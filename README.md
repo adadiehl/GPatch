@@ -38,11 +38,13 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 
 #### Required Arguments
 | Argument | Description |
+|---|---|
 | __-q SAM/BAM, --query_bam SAM/BAM__ | Path to SAM/BAM file containing non-overlapping contig mappings to the reference genome. |
 | __-r FASTA, --reference_fasta FASTA__ | Path to reference genome fasta. |
 
 #### Optional Arguments:
 | Argument | Description |
+|---|---|
 | __-h, --help__ | Show this help message and exit. |
 | __-x STR, --prefix STR__ | Prefix to add to output file names. Default=None |
 | __-b FILENAME, --store_final_bam FILENAME__ | Store the final set of primary contig alignments to the fiven file name. Default: Do not store the final BAM. |
