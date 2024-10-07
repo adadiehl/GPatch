@@ -174,12 +174,12 @@ def sorted_bam_from_aln_list(aln_list, bam_header, sorted_bam_name=None):
 
 
 def main():
-    parser = ArgumentParser(description="Given a name-sorted BAM file, cluster mapped reads by name and use the maximal interval defined by the primary and supplementary reads on the same chromosome and strand to define the contig break-points in the reference genome. ")
+    parser = ArgumentParser(description="Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference.")
     parser.add_argument('-q', '--query_bam', metavar='SAM/BAM', type=str,
                         required=True, help='Path to SAM/BAM file containing non-overlapping contig mappings to the reference genome.')
     parser.add_argument('-r', '--reference_fasta', metavar='FASTA', type=str,
                         required=True, help='Path to reference genome fasta.')
-    parser.add_argument('-x', '--prefix', metavar='BED', type=str,
+    parser.add_argument('-x', '--prefix', metavar='STR', type=str,
                         required=False, default="",
                         help='Prefix to add to output file names. Default=None')
     parser.add_argument('-b', '--store_final_bam', metavar='FILENAME', type=str,
