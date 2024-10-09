@@ -194,6 +194,30 @@ def sorted_bam_from_aln_list(aln_list, bam_header, sorted_bam_name=None):
     return sorted_bam_name
 
 
+def whitelist_filter(sorted_alignments_bam, whitelist, sorted_bam_name=None):
+    """
+    Given a sorted BAM file, use a system call to SAMTools to
+    extract only alignments overlapping intervals within the
+    whitelist BED.
+    """
+    tmp_root = ''.join(random.sample('0123456789', 10))
+    tmp_bam_name = tmp_root + '.tmp.bam'
+    if sorted_bam_name is None:
+        sorted_bam_name = tmp_root + '.tmp.sorted.bam'
+    # Because pysam.view is buggy about creating output files with -o, we need
+    # to touch the output file before calling pysam view.
+    pb = open(tmp_bam_name, 'w')
+    pb.close()
+    pysam.view("-L", whitelist, "-h", "-b", "-o", tmp_bam_name, sorted_alignments_bam, catch_stdout=False)
+    # Sort and index the result. Not sure if this is really necessary,
+    # since input is already sorted. In principle, sort order may not be
+    # maintainted, though -- not sure this is guaranteed.
+    pysam.sort("-o", sorted_bam_name, tmp_bam_name)
+    pysam.index(sorted_bam_name)
+    os.remove(tmp_bam_name)
+    return sorted_bam_name
+
+
 def main():
     parser = ArgumentParser(description="Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference.")
     parser.add_argument('-q', '--query_bam', metavar='SAM/BAM', type=str,
@@ -218,6 +242,9 @@ def main():
     parser.add_argument('-e', '--max_expansion', metavar='FLOAT', type=float,
                         required=False, default=2.0,
                         help='Maximum factor by which the mapped interval is allowed to expand relative to the contig length. I.e., 2.0 allows the mapped interval to be up to double the length of the contig. Default=2.0')
+    parser.add_argument('-w', '--whitelist', metavar='PATH', type=str,
+                        required=False, default=None,
+                        help='Path to BED file containing whitelist regions: i.e., the inverse of blacklist regions. Supplying this will have the effect of excluding alignments that fall entirely within blacklist regions. Default=None')
     
     args = parser.parse_args()
 
@@ -236,6 +263,17 @@ def main():
     sys.stderr.write("Sorting primary alignments...\n")
     sorted_primary_alignments_bam = sorted_bam_from_aln_list(primary_alignments, query_bam.header, sorted_bam_name=args.store_final_bam)
     pysam.index(sorted_primary_alignments_bam)
+
+    # Exclude alignments entirely within blacklist regions if requested.
+    if args.whitelist is not None:
+        sys.stderr.write("Filtering against the whitelist...\n")
+        filtered_bam = whitelist_filter(sorted_primary_alignments_bam, args.whitelist)
+        # Swap the filtered bam in for the sorted primary alignments bam
+        os.remove(sorted_primary_alignments_bam)
+        os.remove(sorted_primary_alignments_bam + ".bai")
+        os.rename(filtered_bam, sorted_primary_alignments_bam)
+        os.rename(filtered_bam + '.bai', sorted_primary_alignments_bam + ".bai")
+        
 
     # Set up output streams for fasta, patches.bed, and contigs.bed
     sys.stderr.write("Patching the genome...\n")
@@ -284,10 +322,12 @@ def main():
             # Write patch coordinates in reference frame to patches_bed
             patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
             # Write contig coordinates in patched-genome frame to contigs_bed
-            contigs_bed.write("%s\t%d\t%d\t%s\t%s\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand))
+            contigs_bed.write("%s\t%d\t%d\t%s\t.%s\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand))
 
-            # Update the current position in the reference sequence.
-            pos = contig_breakpoints[contig.query_name][2]
+            # Update the current position in the reference sequence if the
+            # end position of the current contig is 3' of the current pos.
+            if contig_breakpoints[contig.query_name][2] > pos:
+                pos = contig_breakpoints[contig.query_name][2]
             
         # Once the above loop finishes, we need to add the terminal segment
         # from the reference genome.
