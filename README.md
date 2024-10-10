@@ -34,7 +34,7 @@ usage: patch_genome.py [-h] -q SAM/BAM -r FASTA [-x BED] [-b FILENAME] [-m N]
                        [-d N] [-f FLOAT] [-e FLOAT]
 ```
 
-Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference.
+Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. Reference chromosomes with no mapped contigs are printed to output unchanged.
 
 #### Required Arguments
 | Argument | Description |
@@ -52,6 +52,16 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __-d N, --max_merge_dist N__ | Maximum distance to merge adjacent alignments within a cluster. Default=100000 |
 | __-f FLOAT, --min_mapped_fraction FLOAT__ | Minimum fraction of the contig length that must be encompassed by the mapped interval. Default=0.5 |
 | __-e FLOAT, --max_expansion FLOAT__ | Maximum factor by which the mapped interval is allowed to expand relative to the contig length. I.e., 2.0 allows the mapped interval to be up to double the length of the contig. Default=2.0 |
+
+
+## Output
+
+patch_genome.py produces three output files:
+| File | Description |
+|---|---|
+| __patched.fasta__ | The final patched genome. |
+| __contigs.bed__ | Location of contigs in the coordinate frame of the patched genome. |
+| __patches.bed__ | Location of patches in the coordinate frame of the reference genome. |
 
 
 ## Citing patch_genome.py
