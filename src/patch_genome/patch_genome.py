@@ -306,6 +306,8 @@ def main():
             # need any intevening patch sequence.
             if rstart > pos:
                 patched_seq = patched_seq + ref_seq.seq[pos:rstart]
+                # Write patch coordinates in reference frame to patches_bed
+                patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
 
             # For now, we won't worry about tyring to merge overlapping contig
             # ends. We will just bookend them into the sequence. This might be
@@ -313,14 +315,12 @@ def main():
             contig_start = len(patched_seq)
             patched_seq = patched_seq + Seq(contig.query_sequence)
 
-            # Gather what we need to write BED coordinates for patch and contig
+            # Gather what we need to write BED coordinates for this contig
             qstrand = "+"
             if contig.is_reverse:
                 # Since BAM sequence is already reverse-complemented, we don't have to!
                 qstrand = "-"
                 
-            # Write patch coordinates in reference frame to patches_bed
-            patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
             # Write contig coordinates in patched-genome frame to contigs_bed
             contigs_bed.write("%s\t%d\t%d\t%s\t.%s\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand))
 
