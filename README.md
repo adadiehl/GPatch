@@ -49,8 +49,8 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __-x STR, --prefix STR__ | Prefix to add to output file names. Default=None |
 | __-b FILENAME, --store_final_bam FILENAME__ | Store the final set of primary contig alignments to the given file name. Default: Do not store the final BAM. |
 | __-m N, --min_qual_score N__ | Minimum mapping quality score to retain an alignment. Default=30 |
-| __-d N, --max_merge_dist N__ | Maximum distance to merge adjacent alignments within a cluster. Default=100000 |
-| __-f FLOAT, --min_mapped_fraction FLOAT__ | Minimum fraction of the contig length that must be encompassed by the mapped interval. Default=0.5 |
+| __-d N, --max_merge_dist N__ | Maximum distance to merge adjacent alignments within a cluster. Default=250000 |
+| __-f FLOAT, --min_mapped_fraction FLOAT__ | Minimum fraction of the contig length that must be encompassed by the mapped interval. Default=0.1 |
 | __-e FLOAT, --max_expansion FLOAT__ | Maximum factor by which the mapped interval is allowed to expand relative to the contig length. I.e., 2.0 allows the mapped interval to be up to double the length of the contig. Default=2.0 |
 
 

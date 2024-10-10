@@ -234,11 +234,11 @@ def main():
                         required=False, default=30,
                         help='Minimum mapping quality score to retain an alignment. Default=30')
     parser.add_argument('-d', '--max_merge_dist', metavar='N', type=int,
-                        required=False, default=100000,
-                        help='Maximum distance to merge adjacent alignments within a cluster. Default=100000')
+                        required=False, default=250000,
+                        help='Maximum distance to merge adjacent alignments within a cluster. Default=250000')
     parser.add_argument('-f', '--min_mapped_fraction', metavar='FLOAT', type=float,
-                        required=False, default=0.5,
-                        help='Minimum fraction of the contig length that must be encompassed by the mapped interval. Default=0.5')
+                        required=False, default=0.1,
+                        help='Minimum fraction of the contig length that must be encompassed by the mapped interval. Default=0.1')
     parser.add_argument('-e', '--max_expansion', metavar='FLOAT', type=float,
                         required=False, default=2.0,
                         help='Maximum factor by which the mapped interval is allowed to expand relative to the contig length. I.e., 2.0 allows the mapped interval to be up to double the length of the contig. Default=2.0')
