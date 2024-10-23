@@ -218,6 +218,86 @@ def whitelist_filter(sorted_alignments_bam, whitelist, sorted_bam_name=None):
     return sorted_bam_name
 
 
+def nested(contig1, contig2, contig_breakpoints):
+    # Check for nesting between two contig alignment spaces.
+    rstart_1 = contig_breakpoints[contig1.query_name][1]
+    rend_1 = contig_breakpoints[contig1.query_name][2]
+    rstart_2 = contig_breakpoints[contig2.query_name][1]
+    rend_2 = contig_breakpoints[contig2.query_name][2]
+    if rstart_2 > rstart_1 and rend_2 < rend_1:
+        # Nested alignment interval.
+        return True
+    else:
+        return False
+
+
+def surrounding(contig1, contig2, contig_breakpoints):
+    # Check to see if contig2 surrounds contig1 alignment space.
+    rstart_1 = contig_breakpoints[contig1.query_name][1]
+    rend_1 = contig_breakpoints[contig1.query_name][2]
+    rstart_2 = contig_breakpoints[contig2.query_name][1]
+    rend_2 = contig_breakpoints[contig2.query_name][2]
+    if rstart_2 < rstart_1 and rend_2 > rend_1:
+        # Nested alignment interval.
+        return True
+    else:
+        return False
+
+
+def overlapping(contig1, contig2, contig_breakpoints):
+    # Check for nesting between two contig alignment spaces.
+    rstart_1 = contig_breakpoints[contig1.query_name][1]
+    rend_1 = contig_breakpoints[contig1.query_name][2]
+    rstart_2 = contig_breakpoints[contig2.query_name][1]
+    rend_2 = contig_breakpoints[contig2.query_name][2]
+    if (rstart_2 > rstart_1 and rstart_2 < rend_1 and rend_2 > rend_1) or (rstart_2 < rstart_1 and rend_2 > rstart_1 and rend_2 < rend_1):
+        return True
+    else:
+        return False
+
+
+def contigs_to_sorted_interval_list(contigs, contig_breakpoints):
+    """
+    Given an iterator over contig alignments from pysam.fetch,
+    generate a list of intervals, sorted on position. Alignments are
+    assumed to be on the same chromosome.
+    """
+    # Push contig alignment space start, end, and name to a list
+    ints = []
+    for contig in contigs:
+        start = contig_breakpoints[contig.query_name][1]
+        end = contig_breakpoints[contig.query_name][2]
+        name = contig.query_name
+        ints.append((start, end, name))
+    # Sort the list by position
+    ret = sorted(ints, key=lambda x: (x[0], x[1]))
+    return ret
+
+
+def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
+    """
+    Given a list of contig intervals, sorted on start then end
+    position, cluster intervals based on linear overlap and
+    return a list of clusters, optionally leaving out any nested
+    intervals.
+    """
+    clusters = []
+        for contig in sorted_contig_intervals:
+            merged = False
+            for cluster in clusters:
+                if contig[0] < cluster[-1][1]:
+                    if drop_nested:
+                        if not contig[1] <= cluster[-1][1]:
+                            cluster.append(contig)
+                    else:
+                        cluster.append(contig)
+                    merged = True
+                    break
+            if not merged:
+                clusters.append([contig])
+    return clusters
+
+
 def main():
     parser = ArgumentParser(description="Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference.")
     parser.add_argument('-q', '--query_bam', metavar='SAM/BAM', type=str,
@@ -229,7 +309,7 @@ def main():
                         help='Prefix to add to output file names. Default=None')
     parser.add_argument('-b', '--store_final_bam', metavar='FILENAME', type=str,
                         required=False, default=None,
-                        help='Store the final set of primary contig alignments to the fiven file name. Default: Do not store the final BAM.')
+                        help='Store the final set of primary contig alignments to the given file name. Default: Do not store the final BAM.')
     parser.add_argument('-m', '--min_qual_score', metavar='N', type=int,
                         required=False, default=30,
                         help='Minimum mapping quality score to retain an alignment. Default=30')
@@ -273,8 +353,107 @@ def main():
         os.remove(sorted_primary_alignments_bam + ".bai")
         os.rename(filtered_bam, sorted_primary_alignments_bam)
         os.rename(filtered_bam + '.bai', sorted_primary_alignments_bam + ".bai")
-        
 
+
+    """
+    TO-DO: It may be more reliable to first cluster all intervals, based on the intervals
+    stored in contig_breakpoints. We would still need to examine overlaps
+    and nesting to select only informative contigs. Not sure if it's possible to do this
+    within the clustering loop or if it's better to do so as a separate step.
+    """
+    # Check for nested/overlapping alignment spaces among the remaining contigs.
+    sys.stderr.write("Checking for nested or overlapping contigs...\n")
+    sorted_primary_alignments = pysam.AlignmentFile(sorted_primary_alignments_bam, "rb")
+    final_alignments = []
+    for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
+        # Select all contigs mapped to this sequence.
+        contigs = list(sorted_primary_alignments.fetch(ref_seq.id))
+
+        # Convert the list of contigs into a list of tuples: (start, end, name),
+        # representing the inferred contig breakpoints, sorted by start, then end position.
+        sorted_contig_intervals = contigs_to_sorted_interval_list(contigs, contig_breakpoints)
+        
+        # Cluster the linear intervals on overlap, leaving out nested contigs
+        clusters = cluster_contig_positions(sorted_contig_intervals, drop_nested=True)
+
+        # Next thing to do is to push all retained contigs across clusters into
+        # a final list of useful contigs. Since pysam.fetch does not allow
+        # retrieval by alignment name, the easiest way to do this is through a
+        # dict of names that will allow us to make a single pass through the
+        # contig list to select what we need.
+        retained_alignments = {}
+        for cluster in clusters:
+            for interval in cluster:
+                retained_alignments[interval[2]] = interval
+        for contig in contigs:
+            if contig.query_name in retained_alignments:
+                final_alignments.push(contig)
+
+        
+        """
+        last_j = 0
+        is_surrounded = False  # True if contig1 is surrounded by another mapping
+        i = 0
+        while i < len(contigs):
+            #sys.stderr.write("%s\t%s\n" % (i, last_j))
+            cluster = []
+            if i < last_j:
+                i = last_j+1 # Skip contigs we've already processed
+            last_j = 0
+            #sys.stderr.write("%s\n" % (i))
+            contig1 = contigs[i]
+
+            for j in range(i+1, len(contigs)):
+                contig2 = contigs[j]
+                
+                if nested(contig1, contig2, contig_breakpoints):
+                    # Nested alignment interval. These are not useful.
+                    last_j = j
+                elif surrounding(contig1, contig2, contig_breakpoints):
+                    # contig2's alignment space surrounds contig1's alignment space.
+                    # Restart the outer loop, staring with this index. This has the
+                    # effect of replacing the nested contig with the surrounding contig.
+                    is_surrounded = True
+                    last_j = j-1
+                    break
+                elif overlapping(contig1, contig2, contig_breakpoints):
+                    # Overlapping alignment intervals.
+                    cluster.append(contig2)
+                    last_j = j
+                else:
+                    # No overlap. Also check for nesting or overlap with contigs already
+                    # in the cluster.
+                    for k in range(len(cluster)):
+                        if overlapping(contig2, cluster[k], contig_breakpoints):
+                            cluster.append(contig2)
+                            last_j = j
+                        elif nested(contig2, cluster[k], contig_breakpoints):
+                            last_j = j
+
+            if last_j == 0:
+                i += 1
+
+            #sys.stderr.write("%s\t%s\t%s\t%s\t%s\n" % (i, last_j, is_surrounded, contig1.query_name, contigs[last_j].query_name))
+
+            # Assuming contig1 is not surrounded by another contig mapping,
+            # append it to the list also.
+            if not is_surrounded:
+                cluster.append(contig1)
+            else:
+                is_surrounded = False
+                continue
+                
+            # Handle the final list of clusters.
+            # For now, we will still bookend overlapping contigs.
+            for contig in cluster:
+                final_alignments.append(contig)
+        """
+    sorted_primary_alignments.close()
+                    
+    # Write the final set of alignments to a sorted BAM file
+    sorted_primary_alignments_bam = sorted_bam_from_aln_list(final_alignments, query_bam.header, sorted_bam_name=args.store_final_bam)                
+    pysam.index(sorted_primary_alignments_bam)
+        
     # Set up output streams for fasta, patches.bed, and contigs.bed
     sys.stderr.write("Patching the genome...\n")
     pf_fname = "patched.fasta"
@@ -305,7 +484,8 @@ def main():
             # Check for overlapping/bookended contig mappings. These will not
             # need any intevening patch sequence.
             if rstart > pos:
-                patched_seq = patched_seq + ref_seq.seq[pos:rstart]
+                # All patches are printed in lower case.
+                patched_seq = patched_seq + ref_seq.seq[pos:rstart].lower()
                 # Write patch coordinates in reference frame to patches_bed
                 patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
 
@@ -313,7 +493,8 @@ def main():
             # ends. We will just bookend them into the sequence. This might be
             # an area to revisit in the future.
             contig_start = len(patched_seq)
-            patched_seq = patched_seq + Seq(contig.query_sequence)
+            # All patch sequences are printed in upper case.
+            patched_seq = patched_seq + Seq(contig.query_sequence).upper()
 
             # Gather what we need to write BED coordinates for this contig
             qstrand = "+"
@@ -322,7 +503,7 @@ def main():
                 qstrand = "-"
                 
             # Write contig coordinates in patched-genome frame to contigs_bed
-            contigs_bed.write("%s\t%d\t%d\t%s\t.%s\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand))
+            contigs_bed.write("%s\t%d\t%d\t%s\t.\t%s\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand))
 
             # Update the current position in the reference sequence if the
             # end position of the current contig is 3' of the current pos.
