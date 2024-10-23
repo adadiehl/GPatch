@@ -282,19 +282,25 @@ def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
     intervals.
     """
     clusters = []
-        for contig in sorted_contig_intervals:
-            merged = False
-            for cluster in clusters:
-                if contig[0] < cluster[-1][1]:
-                    if drop_nested:
-                        if not contig[1] <= cluster[-1][1]:
-                            cluster.append(contig)
-                    else:
+    for contig in sorted_contig_intervals:
+        #sys.stderr.write("{0}\n".format(contig))
+        merged = False
+        for cluster in clusters:
+            #sys.stderr.write("\t%s\n" % (cluster))
+            if contig[0] <= cluster[-1][1]:
+                if drop_nested:
+                    if not contig[1] <= cluster[-1][1]:
                         cluster.append(contig)
-                    merged = True
-                    break
-            if not merged:
-                clusters.append([contig])
+                    else:
+                        #sys.stderr.write("\tnested\n")
+                        pass
+                else:
+                    cluster.append(contig)
+                #sys.stderr.write("\tmerged\n")
+                merged = True
+                break
+        if not merged:
+            clusters.append([contig])
     return clusters
 
 
@@ -354,13 +360,15 @@ def main():
         os.rename(filtered_bam, sorted_primary_alignments_bam)
         os.rename(filtered_bam + '.bai', sorted_primary_alignments_bam + ".bai")
 
+    """
+    # TO-DO: This should be here, not above. Requires refactoring
+    # whitelist_filter to take a list instead of a BAM file.
+    # Sort the useful primary alignments by position via pysam sort.
+    sys.stderr.write("Sorting primary alignments...\n")
+    sorted_primary_alignments_bam = sorted_bam_from_aln_list(primary_alignments, query_bam.header, sorted_bam_name=args.store_final_bam)
+    pysam.index(sorted_primary_alignments_bam)
+    """
 
-    """
-    TO-DO: It may be more reliable to first cluster all intervals, based on the intervals
-    stored in contig_breakpoints. We would still need to examine overlaps
-    and nesting to select only informative contigs. Not sure if it's possible to do this
-    within the clustering loop or if it's better to do so as a separate step.
-    """
     # Check for nested/overlapping alignment spaces among the remaining contigs.
     sys.stderr.write("Checking for nested or overlapping contigs...\n")
     sorted_primary_alignments = pysam.AlignmentFile(sorted_primary_alignments_bam, "rb")
@@ -387,67 +395,8 @@ def main():
                 retained_alignments[interval[2]] = interval
         for contig in contigs:
             if contig.query_name in retained_alignments:
-                final_alignments.push(contig)
-
-        
-        """
-        last_j = 0
-        is_surrounded = False  # True if contig1 is surrounded by another mapping
-        i = 0
-        while i < len(contigs):
-            #sys.stderr.write("%s\t%s\n" % (i, last_j))
-            cluster = []
-            if i < last_j:
-                i = last_j+1 # Skip contigs we've already processed
-            last_j = 0
-            #sys.stderr.write("%s\n" % (i))
-            contig1 = contigs[i]
-
-            for j in range(i+1, len(contigs)):
-                contig2 = contigs[j]
-                
-                if nested(contig1, contig2, contig_breakpoints):
-                    # Nested alignment interval. These are not useful.
-                    last_j = j
-                elif surrounding(contig1, contig2, contig_breakpoints):
-                    # contig2's alignment space surrounds contig1's alignment space.
-                    # Restart the outer loop, staring with this index. This has the
-                    # effect of replacing the nested contig with the surrounding contig.
-                    is_surrounded = True
-                    last_j = j-1
-                    break
-                elif overlapping(contig1, contig2, contig_breakpoints):
-                    # Overlapping alignment intervals.
-                    cluster.append(contig2)
-                    last_j = j
-                else:
-                    # No overlap. Also check for nesting or overlap with contigs already
-                    # in the cluster.
-                    for k in range(len(cluster)):
-                        if overlapping(contig2, cluster[k], contig_breakpoints):
-                            cluster.append(contig2)
-                            last_j = j
-                        elif nested(contig2, cluster[k], contig_breakpoints):
-                            last_j = j
-
-            if last_j == 0:
-                i += 1
-
-            #sys.stderr.write("%s\t%s\t%s\t%s\t%s\n" % (i, last_j, is_surrounded, contig1.query_name, contigs[last_j].query_name))
-
-            # Assuming contig1 is not surrounded by another contig mapping,
-            # append it to the list also.
-            if not is_surrounded:
-                cluster.append(contig1)
-            else:
-                is_surrounded = False
-                continue
-                
-            # Handle the final list of clusters.
-            # For now, we will still bookend overlapping contigs.
-            for contig in cluster:
                 final_alignments.append(contig)
-        """
+
     sorted_primary_alignments.close()
                     
     # Write the final set of alignments to a sorted BAM file
