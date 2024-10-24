@@ -432,20 +432,25 @@ def main():
             if rstart > 0:
                 rstart -= 1
 
-            # Check for overlapping/bookended contig mappings. These will not
-            # need any intevening patch sequence.
+            # Check for overlapping/bookended contig mappings.
+            qstart = 0  # Start of contig interval to append
             if rstart > pos:
-                # All patches are printed in lower case.
+                # No overlap. Append the patch, in all lower-case
+                # for easy identification.
                 patched_seq = patched_seq + ref_seq.seq[pos:rstart].lower()
                 # Write patch coordinates in reference frame to patches_bed
                 patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
-
-            # For now, we won't worry about tyring to merge overlapping contig
-            # ends. We will just bookend them into the sequence. This might be
-            # an area to revisit in the future.
+            else:
+                # Handle overlapping contig ends by trimming the 5' end of
+                # this contig sequence by the length of the overlap.
+                qstart = pos - rstart
+                
+            # Append the contig sequence to the patched sequence string
             contig_start = len(patched_seq)
             # All patch sequences are printed in upper case.
-            patched_seq = patched_seq + Seq(contig.query_sequence).upper()
+            # Overlaps with the previous contig are handled by truncating
+            # the 3' end of this contig sequence.
+            patched_seq = patched_seq + Seq(contig.query_sequence)[qstart:len(Seq(contig.query_sequence))].upper()
 
             # Gather what we need to write BED coordinates for this contig
             qstrand = "+"
@@ -459,6 +464,7 @@ def main():
             # Update the current position in the reference sequence if the
             # end position of the current contig is 3' of the current pos.
             if contig_breakpoints[contig.query_name][2] > pos:
+                # This should always evaluate true in the absence of nested contigs.
                 pos = contig_breakpoints[contig.query_name][2]
             
         # Once the above loop finishes, we need to add the terminal segment
