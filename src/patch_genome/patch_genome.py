@@ -16,7 +16,7 @@ reads on the same chromosome and strand to define the contig
 break-points in the reference genome.
 """
 
-def create_alignment_dict(query_bam, min_qual_score):
+def create_alignment_dict(query_bam, min_qual_score, primary_only=False):
     """
     Create a dict of alignments, keyed on read name. This gives us
     the clusters of primary and supplementary alignments we need to
@@ -32,10 +32,34 @@ def create_alignment_dict(query_bam, min_qual_score):
             # Skip low-quality mappings
             continue
         if aln.query_name in ret:
-            ret[aln.query_name].append(aln)
+            if primary_only and not (aln.is_supplementary or aln.is_secondary):
+                ret[aln.query_name].append(aln)
+            elif primary_only == False:
+                ret[aln.query_name].append(aln)
         else:
-            ret[aln.query_name] = [aln]        
+            if primary_only and not (aln.is_supplementary or aln.is_secondary):
+                ret[aln.query_name] = [aln]
+            elif primary_only == False:
+                ret[aln.query_name] = [aln]
     return(ret)
+
+
+def create_primary_alignments_list(query_bam, min_qual_score):
+    """
+    Extract all primary alignments from the BAM file and return
+    as a list.
+    """
+    ret = []
+    for aln in query_bam:
+        if aln.is_unmapped:
+            # Skip unmapped contigs
+            continue
+        if aln.mapping_quality < min_qual_score:
+            # Skip low-quality mappings
+            continue
+        if not (aln.is_supplementary or aln.is_secondary):
+            ret.append(aln)
+    return ret
 
 
 def find_breakpoints(aligned_contigs, query_bam, max_merge_dist, min_mapped_fraction, max_expansion):
@@ -176,6 +200,29 @@ def find_breakpoints(aligned_contigs, query_bam, max_merge_dist, min_mapped_frac
     return primary_alignments, contig_breakpoints
 
 
+def contig_breakpoints_from_cigar(primary_alignments):
+    """
+    Infer the contig breakpoints using soft-clips on the primary
+    alignments.
+    """
+    contig_breakpoints = {}
+    for contig in primary_alignments:
+        # Default to mapped coordinates
+        chrom = contig.reference_name
+        start = contig.reference_start
+        end = contig.reference_end
+        # Check for left and right soft-clips
+        if contig.cigartuples[0][0] == 4:
+            # left soft-clip
+            start -= contig.cigartuples[0][1]
+        if contig.cigartuples[-1][0] == 4:
+            # right soft-clip
+            end += contig.cigartuples[-1][1]
+        contig_breakpoints[contig.query_name] = [chrom, start, end, contig.query_name]
+
+    return contig_breakpoints
+    
+
 def sorted_bam_from_aln_list(aln_list, bam_header, sorted_bam_name=None):
     """
     Given a list of pysam AlignedSegment objects, sort by position with
@@ -199,7 +246,7 @@ def whitelist_filter(sorted_alignments_bam, whitelist, sorted_bam_name=None):
     Given a sorted BAM file, use a system call to SAMTools to
     extract only alignments overlapping intervals within the
     whitelist BED.
-    """
+    """    
     tmp_root = ''.join(random.sample('0123456789', 10))
     tmp_bam_name = tmp_root + '.tmp.bam'
     if sorted_bam_name is None:
@@ -216,44 +263,6 @@ def whitelist_filter(sorted_alignments_bam, whitelist, sorted_bam_name=None):
     pysam.index(sorted_bam_name)
     os.remove(tmp_bam_name)
     return sorted_bam_name
-
-
-def nested(contig1, contig2, contig_breakpoints):
-    # Check for nesting between two contig alignment spaces.
-    rstart_1 = contig_breakpoints[contig1.query_name][1]
-    rend_1 = contig_breakpoints[contig1.query_name][2]
-    rstart_2 = contig_breakpoints[contig2.query_name][1]
-    rend_2 = contig_breakpoints[contig2.query_name][2]
-    if rstart_2 > rstart_1 and rend_2 < rend_1:
-        # Nested alignment interval.
-        return True
-    else:
-        return False
-
-
-def surrounding(contig1, contig2, contig_breakpoints):
-    # Check to see if contig2 surrounds contig1 alignment space.
-    rstart_1 = contig_breakpoints[contig1.query_name][1]
-    rend_1 = contig_breakpoints[contig1.query_name][2]
-    rstart_2 = contig_breakpoints[contig2.query_name][1]
-    rend_2 = contig_breakpoints[contig2.query_name][2]
-    if rstart_2 < rstart_1 and rend_2 > rend_1:
-        # Nested alignment interval.
-        return True
-    else:
-        return False
-
-
-def overlapping(contig1, contig2, contig_breakpoints):
-    # Check for nesting between two contig alignment spaces.
-    rstart_1 = contig_breakpoints[contig1.query_name][1]
-    rend_1 = contig_breakpoints[contig1.query_name][2]
-    rstart_2 = contig_breakpoints[contig2.query_name][1]
-    rend_2 = contig_breakpoints[contig2.query_name][2]
-    if (rstart_2 > rstart_1 and rstart_2 < rend_1 and rend_2 > rend_1) or (rstart_2 < rstart_1 and rend_2 > rstart_1 and rend_2 < rend_1):
-        return True
-    else:
-        return False
 
 
 def contigs_to_sorted_interval_list(contigs, contig_breakpoints):
@@ -338,12 +347,14 @@ def main():
     
     # Load up the BAM into a dict, keyed on contig name.
     sys.stderr.write("Loading alignments...\n")
-    aligned_contigs = create_alignment_dict(query_bam, args.min_qual_score)
+    #aligned_contigs = create_alignment_dict(query_bam, args.min_qual_score)
+    primary_alignments = create_primary_alignments_list(query_bam, args.min_qual_score)
 
     # Determine insertion break-points for each contig based
     # on primary and supplementary mappings.
     sys.stderr.write("Locating contig breakpoints...\n")
-    primary_alignments, contig_breakpoints = find_breakpoints(aligned_contigs, query_bam, args.max_merge_dist, args.min_mapped_fraction, args.max_expansion)
+    #primary_alignments, contig_breakpoints = find_breakpoints(aligned_contigs, query_bam, args.max_merge_dist, args.min_mapped_fraction, args.max_expansion)
+    contig_breakpoints = contig_breakpoints_from_cigar(primary_alignments)
 
     # Sort the useful primary alignments by position via pysam sort.
     sys.stderr.write("Sorting primary alignments...\n")
@@ -359,15 +370,6 @@ def main():
         os.remove(sorted_primary_alignments_bam + ".bai")
         os.rename(filtered_bam, sorted_primary_alignments_bam)
         os.rename(filtered_bam + '.bai', sorted_primary_alignments_bam + ".bai")
-
-    """
-    # TO-DO: This should be here, not above. Requires refactoring
-    # whitelist_filter to take a list instead of a BAM file.
-    # Sort the useful primary alignments by position via pysam sort.
-    sys.stderr.write("Sorting primary alignments...\n")
-    sorted_primary_alignments_bam = sorted_bam_from_aln_list(primary_alignments, query_bam.header, sorted_bam_name=args.store_final_bam)
-    pysam.index(sorted_primary_alignments_bam)
-    """
 
     # Check for nested/overlapping alignment spaces among the remaining contigs.
     sys.stderr.write("Checking for nested or overlapping contigs...\n")
