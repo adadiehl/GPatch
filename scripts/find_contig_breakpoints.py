@@ -57,27 +57,6 @@ def overlaps(contig, aln):
     return False
 
 
-def cluster_alignments(alignments, max_cluster_dist = 0):
-    """
-    Cluster linear intervals closer together than max_cluster_dist.
-    Reports a pseudo-alignment that spans the maximal query interval
-    defined by each cluster.
-    """
-    sorted_alignments = sorted(alignments, key = lambda x: (int(x[2]), int(x[3])))
-    clusters = []
-    for aln in sorted_alignments:
-        merged = False
-        for cluster in clusters:
-            if int(aln[2]) <= int(cluster[-1][3]) + max_cluster_dist:
-                cluster.append(aln)
-                merged = True
-                break
-        if not merged:
-            clusters.append([aln])
-    #sys.stderr.write("%s\n" % (clusters))
-    return clusters
-            
-
 def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query_dist = 10000):
     """
     Given a set of alignments, create clusters based on mapped
@@ -175,7 +154,7 @@ def main():
                     suspicious_clusters.append(cluster)
 
             # Check for overlapping/duplicated query intervals. Sometimes this happens when
-            # things multipmap. Note this keeps the first cluster, regardless of if it's the
+            # things multimap. Note this keeps the first cluster, regardless of if it's the
             # maximal interval for the given query window.
             final_clusters = []
             for cluster in suspicious_clusters:
@@ -216,61 +195,6 @@ def main():
                     ends.sort()
                     sys.stdout.write("%s\t%d\t%d\t%s\n" % ("\t".join(contig), starts[0], ends[-1], code))
                 
-                
-            """
-            suspicious_alignments = []
-            for aln in alignments:
-                #sys.stderr.write("%s\n" % (aln))
-                ldist = abs(int(aln[2]) - int(contig[1]))   # Distance from left end of 3'-most partial alignment to left end of contig
-                rdist = abs(int(aln[3]) - int(contig[2]))   # Distance from right end of 5'-most partial alignment to right end of contig
-                if ldist <= args.max_dist or rdist <= args.max_dist:
-                    if aln[0] != aln[5]:
-                        # Translocation on different chromosome
-                        code = "TRD"
-                        suspicious_alignments.append(aln)
-                    else:
-                        if aln[4] == "-":
-                            # Inversion
-                            code = "INV"
-                            suspicious_alignments.append(aln)
-                        elif abs(int(aln[2]) - int(aln[7])) >= args.min_trans_dist:
-                            code = "TRS"
-                            suspicious_alignments.append(aln)
-
-            if len(suspicious_alignments) > 0:
-                starts = []
-                ends = []
-                for aln in suspicious_alignments:
-                    starts.append(int(aln[2]))
-                    ends.append(int(aln[3]))
-                starts.sort()
-                ends.sort()
-                sys.stdout.write("%s\t%d\t%d\t%s\n" % ("\t".join(contig), starts[0], ends[-1], code))
-            """
-
-            """
-            # Group overlapping alignments into linear clusters
-            clustered_alignments = cluster_alignments(alignments, max_cluster_dist = args.max_cluster_dist)
-            
-            
-            for cluster in clustered_alignments:
-                #sys.stderr.write("%s\n" % (cluster))
-                starts = []
-                ends = []
-                for aln in cluster:
-                    #sys.stderr.write("%s\n" % (aln))
-                    starts.append(int(aln[2]))
-                    ends.append(int(aln[3]))
-                ldist = abs(starts[0] - int(contig[1]))   # Distance from left end of 3'-most partial alignment to left end of contig
-                rdist = abs(ends[-1] - int(contig[2]))   # Distance from right end of 5'-most partial alignment to right end of contig
-                #sys.stderr.write("%d\t%d\n" % (ldist, rdist))
-                if ldist <= args.max_dist or rdist <= args.max_dist:
-                    # Breakpoint near the end of a conti             
-                    sys.stderr.write("%s\n" % (cluster))
-                    sys.stdout.write("%s\t%d\t%d\n" % ("\t".join(contig), starts[0], ends[-1]))                
-            """
-            
-    
     sys.stderr.write("Done!\n")
         
 if __name__ == '__main__':
