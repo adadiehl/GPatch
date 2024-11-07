@@ -282,7 +282,7 @@ def main():
                 qstrand = "-"
                 
             # Write contig coordinates in patched-genome frame to contigs_bed
-            contigs_bed.write("%s\t%d\t%d\t%s\t.\t%s\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand))
+            contigs_bed.write("%s\t%d\t%d\t%s\t.\t%s\t%d\t%d\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand, qstart, len(Seq(contig.query_sequence))))
 
             # Update the current position in the reference sequence if the
             # end position of the current contig is 3' of the current pos.
