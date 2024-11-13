@@ -45,7 +45,7 @@ minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $PREFIX.break_contigs.fa | samtools 
 time $PG_PATH/patch_genome.py -q $prefix.break_contigs.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST 2>> $PREFIX.patch_genome.err
 
 # Stats and dot plots
-printf "post-break contig base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.contigs.bed) > $PREFIX.stats
+printf "post-break contig base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.contigs.bed) >> $PREFIX.stats
 printf "post-break patch base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.patches.bed) >> $PREFIX.stats
 printf "post-break total patched genome size (bp): %d\n" $(grep -v ">" $PREFIX.patched.fasta | awk 'BEGIN{N=0}{N+=length($0)}END{print N}') >> $PREFIX.stats
 
