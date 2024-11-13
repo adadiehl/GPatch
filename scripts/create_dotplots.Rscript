@@ -1,0 +1,34 @@
+#!/usr/bin/Rscript --vanilla
+
+args = commandArgs(trailingOnly=TRUE)
+
+require("pafr")
+
+path_to_ali = args[1]
+prefix = args[2]
+ref_name = args[3]
+
+dotplot_all_chroms = function(ali, chroms, root_fname = "") {
+    # Generate dot plots for all chromosomes in chroms based on
+    # alignments in paf file at path_to_paf.
+    for (chrom in chroms) {
+        pdf_name = paste(root_fname, chrom, "pdf", sep=".")
+        to_keep = list(c(chrom), c(chrom))
+        pdf(pdf_name)
+        print(dotplot(ali, label_seqs=TRUE, order_by="provided", ordering=to_keep))
+        dev.off()
+    }
+}
+
+ali = read_paf(path_to_ali)
+
+# All vs. All dot plot
+pdf_name = paste(prefix, "dotplot", ref_name, "all.pdf", sep=".")
+pdf(pdf_name)
+dotplot(ali, label_seqs=TRUE, order_by="qstart")
+dev.off()
+
+# Individual chromosome dot plots
+chroms = paste("chr", c(1:22, "X", "Y"), sep="")
+root_fname = paste(prefix, "dotplot", ref_name, sep=".")
+dotplot_all_chroms(ali, chroms, root_fname=root_fname)
