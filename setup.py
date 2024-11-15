@@ -40,12 +40,12 @@ def main():
             ]
         },
         setup_requires=[
-            'Bio',
+            'biopython',
             'pysam',
             'minimap2'
         ],
         install_requires=[
-            'Bio',
+            'biopython',
             'pysam',
             'minimap2'
         ],

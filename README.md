@@ -6,6 +6,7 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 ## Dependencies
 * Python >= v3.7
 * samtools (https://github.com/samtools/samtools)
+* biopython (https://biopython.org/)
 * pysam (https://github.com/pysam-developers/pysam)
 * minimap2 (https://github.com/lh3/minimap2)
 
