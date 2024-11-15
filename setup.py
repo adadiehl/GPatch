@@ -1,7 +1,7 @@
 import sys
 
 if sys.version_info > (3, ) and sys.version_info < (3, 3):
-    sys.exit("ERROR: mapGL requires Python 3.3 or greater")
+    sys.exit("ERROR: patch_genome.py requires Python 3.3 or greater")
 
 try:
     from setuptools import setup, find_packages
@@ -42,10 +42,12 @@ def main():
         setup_requires=[
             'Bio',
             'pysam',
+            'minimap2'
         ],
         install_requires=[
             'Bio',
             'pysam',
+            'minimap2'
         ],
         entry_points={
             'console_scripts': [
@@ -70,5 +72,4 @@ def main():
     setup(**metadata)
         
 if __name__ == "__main__":
-    monkey_patch_numpy()
     main()

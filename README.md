@@ -7,6 +7,7 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 * Python >= v3.7
 * samtools (https://github.com/samtools/samtools)
 * pysam (https://github.com/pysam-developers/pysam)
+* minimap2 (https://github.com/lh3/minimap2)
 
 We recommend using minimap2 for alignment, using the -a option to generate SAM output.
 
