@@ -16,16 +16,16 @@ SCRIPTS_PATH=/data/projects/adadiehl/genome_patching/patch_genome/scripts
 
 # Initial mapping of the assembly genome and first-round of patching.
 echo "Initial mapping to reference..."
-#minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $ASSEMBLY_FASTA | samtools view -b - > $PREFIX.bam 2> $PREFIX.patch_genome.err
+minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $ASSEMBLY_FASTA | samtools view -b - > $PREFIX.bam 2> $PREFIX.patch_genome.err
 
 echo "Initial genome patching..."
-#time $PG_PATH/patch_genome.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST 2>> $PREFIX.patch_genome.err
+time $PG_PATH/patch_genome.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST 2>> $PREFIX.patch_genome.err
 
 # Stats and dot plots
-#printf "pre-break contig base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.contigs.bed) > $PREFIX.stats
-#printf "pre-break patch base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.patches.bed) >> $PREFIX.stats
-#printf "Initial unpatched assembly genome size (bp): %d\n" $(grep -v ">" $ASSEMBLY_FASTA | awk 'BEGIN{N=0}{N+=length($0)}END{print N}') >> $PREFIX.stats
-#printf "pre-break total patched genome size (bp): %d\n" $(grep -v ">" $PREFIX.patched.fasta | awk 'BEGIN{N=0}{N+=length($0)}END{print N}') >> $PREFIX.stats
+printf "pre-break contig base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.contigs.bed) > $PREFIX.stats
+printf "pre-break patch base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.patches.bed) >> $PREFIX.stats
+printf "Initial unpatched assembly genome size (bp): %d\n" $(grep -v ">" $ASSEMBLY_FASTA | awk 'BEGIN{N=0}{N+=length($0)}END{print N}') >> $PREFIX.stats
+printf "pre-break total patched genome size (bp): %d\n" $(grep -v ">" $PREFIX.patched.fasta | awk 'BEGIN{N=0}{N+=length($0)}END{print N}') >> $PREFIX.stats
 
 # Alignment to reference and dot-plots.
 echo "Aligning patched genome to reference..."
