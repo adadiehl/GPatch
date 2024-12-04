@@ -249,12 +249,14 @@ def main():
     
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
         # Select all contigs mapped to this sequence.
-        contigs = sorted_primary_alignments.fetch(ref_seq.id)
+        contigs = list(sorted_primary_alignments.fetch(ref_seq.id))
 
         # If no contigs map to this sequence, either print it unchanged
         # or omit it, depending on args.
         if len(contigs) == 0:
-            if not args.drop_missing:
+            if args.drop_missing:
+                sys.stderr.write("No contigs map to %s. Omitting from output.\n" % (ref_seq.id))
+            else:
                 sys.stderr.write("No contigs map to %s. Printing the reference sequence to output unchanged.\n" % (ref_seq.id))
                 patched_fasta.write("%s\n" % (ref_seq.format("fasta")))
             continue
