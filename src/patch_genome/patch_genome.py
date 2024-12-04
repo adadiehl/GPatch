@@ -165,6 +165,9 @@ def main():
     parser.add_argument('-w', '--whitelist', metavar='PATH', type=str,
                         required=False, default=None,
                         help='Path to BED file containing whitelist regions: i.e., the inverse of blacklist regions. Supplying this will have the effect of excluding alignments that fall entirely within blacklist regions. Default=None')
+    parser.add_argument('-d', '--drop_missing', type=bool,
+                        required=False, default=False,
+                        help='Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged.')
     
     args = parser.parse_args()
 
@@ -247,6 +250,14 @@ def main():
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
         # Select all contigs mapped to this sequence.
         contigs = sorted_primary_alignments.fetch(ref_seq.id)
+
+        # If no contigs map to this sequence, either print it unchanged
+        # or omit it, depending on args.
+        if len(contigs) == 0:
+            if not args.drop_missing:
+                sys.stderr.write("No contigs map to %s. Printing the reference sequence to output unchanged.\n" % (ref_seq.id))
+                patched_fasta.write("%s\n" % (ref_seq.format("fasta")))
+            continue
         
         pos = 0 # Tracks position on the reference chromosome        
         patched_seq = ""
@@ -292,11 +303,6 @@ def main():
             
         # Once the above loop finishes, we need to add the terminal segment
         # from the reference genome.
-        # It is important to note that, if no contigs were placed on the current
-        # reference chromosome, the value of 'pos' will remain zero, so patched_seq
-        # ends up being identical to the reference sequence in the output.
-        if pos == 0:
-            sys.stderr.write("No contigs map to %s. Printing the reference sequence to output unchanged.\n" % (ref_seq.id))
         patched_seq = patched_seq + ref_seq.seq[pos:len(ref_seq.seq)]
         patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, len(ref_seq.seq)))
 
