@@ -32,7 +32,11 @@ def main():
         long_description=readme(),
         long_description_content_type="text/markdown",
         url="https://github.com/adadiehl/GPatch",
-        packages = find_packages(),
+        packages = find_packages('src'),
+        package_dir = {'':'src'},
+        py_modules = [splitext(basename(path))[0] for path in glob('src/GPatch/*.py')],
+        include_package_data = True,
+        zip_safe = False,
         package_data = {
             'GPatch': [
                 "LICENSE",
