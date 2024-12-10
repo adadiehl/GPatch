@@ -1,7 +1,7 @@
 import sys
 
-if sys.version_info > (3, ) and sys.version_info < (3, 3):
-    sys.exit("ERROR: patch_genome.py requires Python 3.3 or greater")
+if sys.version_info > (3, ) and sys.version_info < (3, 7):
+    sys.exit("ERROR: GPatch requires Python 3.7 or greater")
 
 try:
     from setuptools import setup, find_packages
@@ -24,34 +24,36 @@ def readme():
 def main():
 
     metadata = dict(
-        name="patch_genome",
+        name="GPatch",
         version="0.0.1",
         author="Adam Diehl",
         author_email="adadiehl@umich.edu",
         description="Assemble contigs into a chromosome-scalse pseudo-assembly using alignments to a reference sequence.",
         long_description=readme(),
         long_description_content_type="text/markdown",
-        url="https://github.com/adadiehl/patch_genome",
+        url="https://github.com/adadiehl/GPatch",
         packages = find_packages(),
         package_data = {
-            'patch_genome': [
+            'GPatch': [
                 "LICENSE",
                 "CODE_OF_CONDUCT.md"
             ]
         },
         setup_requires=[
-            'biopython',
+            'Bio',
             'pysam',
-            'minimap2'
+            'minimap2',
+            'samtools'
         ],
         install_requires=[
-            'biopython',
+            'Bio',
             'pysam',
-            'minimap2'
+            'minimap2',
+            'samtools'
         ],
         entry_points={
             'console_scripts': [
-                'patch_genome.py = patch_genome.patch_genome:main'
+                'GPatch.py = GPatch.GPatch:main'
             ]
         },
         classifiers=[

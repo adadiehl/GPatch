@@ -1,4 +1,4 @@
-# patch_genome.py
+# GPatch
 ## Assemble contigs into a chromosome-scalse pseudo-assembly using alignments to a reference sequence.
 
 Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference.

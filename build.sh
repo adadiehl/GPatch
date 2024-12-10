@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Create a new mapGL release and update all repositories. Takes one
+# Create a new gpatch release and update all repositories. Takes one
 # argument to indicate whether this is a major, minor, or patch release.
 
 # Increment version numbers
