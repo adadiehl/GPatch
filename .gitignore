@@ -1,2 +1,4 @@
 *~
 src/GPatch/patch_genome.py
+.eggs
+build

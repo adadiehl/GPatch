@@ -42,14 +42,12 @@ def main():
         setup_requires=[
             'Bio',
             'pysam',
-            'minimap2',
-            'samtools'
+            'minimap2'
         ],
         install_requires=[
             'Bio',
             'pysam',
-            'minimap2',
-            'samtools'
+            'minimap2'
         ],
         entry_points={
             'console_scripts': [
