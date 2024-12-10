@@ -49,7 +49,7 @@ def main():
         ],
         entry_points={
             'console_scripts': [
-                'GPatch.py = GPatch.GPatch:main'
+                'GPatch = GPatch.GPatch:main'
             ]
         },
         classifiers=[
