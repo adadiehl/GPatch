@@ -16,17 +16,17 @@ We recommend using minimap2 for alignment, using the -a option to generate SAM o
 
 We recommend installing with conda, into a new environment:
 ```
-conda create -n patch_genome -c conda-forge -c bioconda Bio pysam minimap2 samtools patch_genome
+conda create -n GPatch -c conda-forge -c bioconda Bio pysam minimap2 samtools GPatch
 ```
 
 Install with pip:
 ```
-pip install patch_genome
+pip install GPatch
 ```
 
 Installation from the github repository is not recommended. However, if you must, follow the steps below:
-1) git clone https://github.com/adadiehl/patch_genome
-2) cd patch_genome/
+1) git clone https://github.com/adadiehl/GPatch
+2) cd GPatch/
 3) python3 -m pip install -e .
 
 
