@@ -32,7 +32,7 @@ Installation from the github repository is not recommended. However, if you must
 
 ## Usage
 ```
-usage: patch_genome.py [-h] -q SAM/BAM -r FASTA [-x BED] [-b FILENAME] [-m N]
+usage: GPatch [-h] -q SAM/BAM -r FASTA [-x BED] [-b FILENAME] [-m N]
                        [-d N] [-f FLOAT] [-e FLOAT]
 ```
 
@@ -55,7 +55,7 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 
 ## Output
 
-patch_genome.py produces three output files:
+GPatch produces three output files:
 | File | Description |
 |---|---|
 | __patched.fasta__ | The final patched genome. |
@@ -63,7 +63,7 @@ patch_genome.py produces three output files:
 | __patches.bed__ | Location of patches in the coordinate frame of the reference genome. |
 
 
-## Citing patch_genome.py
+## Citing GPatch
 Please use the following citation if you use this software in your work:
 
 CITATION_HERE
