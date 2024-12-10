@@ -1,8 +1,12 @@
 import sys
+from glob import glob
+from os.path import basename, splitext
+from pathlib import Path
 
 if sys.version_info > (3, ) and sys.version_info < (3, 7):
     sys.exit("ERROR: GPatch requires Python 3.7 or greater")
 
+package_dir = {'':'src'}
 try:
     from setuptools import setup, find_packages
 except ImportError:
