@@ -25,7 +25,7 @@ def main():
 
     metadata = dict(
         name="GPatch",
-        version="0.3.2",
+        version="0.3.3",
         author="Adam Diehl",
         author_email="adadiehl@umich.edu",
         description="Assemble contigs into a chromosome-scalse pseudo-assembly using alignments to a reference sequence.",
