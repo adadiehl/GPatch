@@ -67,8 +67,6 @@ def main():
             "Natural Language :: English"
         ],
         keywords = "genomics, genome assembly",
-        include_package_data=True,
-        zip_safe=False,
     )
             
     setup(**metadata)
