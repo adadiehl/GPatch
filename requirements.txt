@@ -1,4 +1,2 @@
 Bio
 pysam
-minimap2
-samtools
