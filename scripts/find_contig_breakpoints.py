@@ -39,6 +39,8 @@ def find_overlapping_alignments(contig, paf):
     those on different chromosomes.
     """
     ret = []
+    if contig[0] not in paf:
+        return ret
     for aln in paf[contig[0]]:
         # loop over alignments from the same query chromosome.
         #sys.stderr.write("%s\n" % (aln))
@@ -126,14 +128,16 @@ def main():
 
             # Gather overlapping alignments on the same query and target chromosome
             alignments = find_overlapping_alignments(contig, paf)
+            if len(alignments) == 0:
+                continue
             #sys.stderr.write("%s\n" % (contig))
             #sys.stderr.write("%s\n\n" % (alignments))
 
             # Cluster alignments based on mapped position, then query strand and position
             # in an attempt to group alignments by event.
             clustered_alignments = cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = args.max_cluster_dist, max_query_dist = args.max_query_dist)
-            #for cluster in clustered_alignments:
-            #    sys.stderr.write("%s\n" % (cluster))
+            for cluster in clustered_alignments:
+                sys.stderr.write("%s\n" % (cluster))
 
             # Go through clusters to isolate those with partial overlap of the right and/or
             # left end of the contig (terminating within max_dist of the contig end)
