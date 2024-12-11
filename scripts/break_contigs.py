@@ -48,6 +48,7 @@ def main():
             # Break the contig at the indicated breakpoints and
             # print a separate record for each fragment.            
             seq = fasta.seq
+            #sys.stderr.write("%d\n" % (len(seq)))
             root_id = fasta.id
             pos = 0    # Start position in fasta sequence
             frag = 0   # Fragment number
@@ -57,15 +58,26 @@ def main():
                 # of the contig from genomic coordinates.
                 fstart = int(bp[8]) - int(bp[1])
                 fend = int(bp[9]) - int(bp[1])
+                #sys.stderr.write("%d\t%d\t%d\n" % (pos, fstart, fend))
                 if fstart < 0:
                     # If the mapped fragment start is upstream of the contig
                     # start, set fstart to zero to avoid errors.
                     fstart = 0
-                if fstart != 0:
+                if fstart < pos:
+                    # Fragment overlaps previous fragment. Truncate at pos.
+                    fstart = pos
+                if fstart >= fend:
+                    # Nested fragment. Skip.
+                    continue
+                if pos == 0 and fstart > pos:
                     fasta.seq = seq[pos:fstart-1]
                     fasta.id = root_id + '_' + str(frag)
                     sys.stdout.write("%s\n" % fasta.format("fasta"))
                     frag += 1
+                if fend > len(seq):
+                    # Don't try to grab sequence past the end of the
+                    # contig!
+                    fend = len(seq)
                     
                 fasta.seq = seq[fstart:fend]
                 fasta.id = root_id + '_' + str(frag)
@@ -75,6 +87,7 @@ def main():
 
             # Handle the last fragment in the contig
             if pos != len(seq):
+                #sys.stderr.write("%d\t%d\n" % (pos, len(seq)))
                 fasta.seq = seq[pos:len(seq)]
                 fasta.id = root_id + '_' + str(frag)
                 sys.stdout.write("%s\n" % fasta.format("fasta"))

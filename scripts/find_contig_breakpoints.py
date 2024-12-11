@@ -48,6 +48,20 @@ def find_overlapping_alignments(contig, paf):
             # Query interval overlap the contig's mapped interval
             ret.append(aln)
     return ret
+
+
+def get_sorted_starts_ends(cluster):
+    """
+    Get sorted start and end positions for a cluster
+    """
+    starts = []
+    ends = []
+    for aln in cluster:
+        starts.append(int(aln[2]))
+        ends.append(int(aln[3]))
+    starts.sort()
+    ends.sort()
+    return starts, ends
     
 
 def overlaps(contig, aln):
@@ -136,8 +150,8 @@ def main():
             # Cluster alignments based on mapped position, then query strand and position
             # in an attempt to group alignments by event.
             clustered_alignments = cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = args.max_cluster_dist, max_query_dist = args.max_query_dist)
-            for cluster in clustered_alignments:
-                sys.stderr.write("%s\n" % (cluster))
+            #for cluster in clustered_alignments:
+            #    sys.stderr.write("%s\n" % (cluster))
 
             # Go through clusters to isolate those with partial overlap of the right and/or
             # left end of the contig (terminating within max_dist of the contig end)
@@ -145,31 +159,38 @@ def main():
             for cluster in clustered_alignments:
                 #sys.stderr.write("%s\n" % (cluster))
                 # Sort query starts and ends independently to account for possible nested intervals
-                starts = []
-                ends = []
-                for aln in cluster:
-                    starts.append(int(aln[2]))
-                    ends.append(int(aln[3]))
-                starts.sort()
-                ends.sort()
+                starts, ends = get_sorted_starts_ends(cluster)
                 ldist = abs(starts[0] - int(contig[1])) 
                 rdist = abs(ends[-1] - int(contig[2]))
+                #sys.stderr.write("%d\t%d\n" % (ldist, rdist))
                 if ldist <= args.max_dist or rdist <= args.max_dist:
+                    #sys.stderr.write("%s\n" % (cluster))
                     suspicious_clusters.append(cluster)
 
+            """
+            This turns out to cause problems with missed rearrangements in more-complex
+            rearrangement scenarios, so skip it!            
             # Check for overlapping/duplicated query intervals. Sometimes this happens when
-            # things multimap. Note this keeps the first cluster, regardless of if it's the
-            # maximal interval for the given query window.
+            # things multimap or in more-complex scenarios (e.g., breakpoints based on multiple
+            # mapped clusters. When this happens, we will adjust the start position of the
+            # overlapping cluster.
             final_clusters = []
             for cluster in suspicious_clusters:
+                sys.stderr.write("%s\n" % (cluster))
                 keep = True
-                for fcluster in final_clusters:
-                    if cluster[0][2] <= fcluster[-1][3]:
+                cstarts, cends = get_sorted_starts_ends(cluster)
+                sys.stderr.write("%s\t%s\n" % (cstarts, cends))
+                for fcluster in final_clusters:                    
+                    fstarts, fends = get_sorted_starts_ends(fcluster)
+                    sys.stderr.write("%s\t%s\n" % (fstarts, fends))
+                    if cstarts[0] <= fends[-1]:
                         keep = False
                         break
                 if keep == True:
+                    sys.stderr.write("%s\n" % (cluster))
                     final_clusters.append(cluster)
-                    
+            """
+            final_clusters = suspicious_clusters
                     
             # Next check to be sure this is a rearrangement breakpoint based on mapped strand
             # (inversions) and distance between query start and mapped start (translocations)
@@ -190,13 +211,7 @@ def main():
                     is_bp = True
                     code = "TRS"
                 if is_bp:
-                    starts = []
-                    ends = []
-                    for aln in cluster:
-                        starts.append(int(aln[2]))
-                        ends.append(int(aln[3]))
-                    starts.sort()
-                    ends.sort()
+                    starts, ends = get_sorted_starts_ends(cluster)
                     sys.stdout.write("%s\t%d\t%d\t%s\n" % ("\t".join(contig), starts[0], ends[-1], code))
                 
     sys.stderr.write("Done!\n")
