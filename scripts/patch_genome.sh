@@ -18,12 +18,21 @@ CBREAK_MAXDIST=2000000
 CBREAK_MAXCDIST=1000000
 CBREAK_MAXQDIST=1000000
 
+# Set this to false to retain reference chromosomes that containg
+# no mapped contigs in the results. These chromosomes will be
+# printed verbatim from the reference.
+DROP_MISSING=true
+
 # Initial mapping of the assembly genome and first-round of patching.
 echo "Initial mapping to reference..."
 minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $ASSEMBLY_FASTA | samtools view -b - > $PREFIX.bam 2> $PREFIX.GPatch.err
 
 echo "Initial genome patching..."
-time $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST 2>> $PREFIX.GPatch.err
+if [ $DROP_MISSING = true ]; then
+    time $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST -d 2>> $PREFIX.GPatch.err
+else
+    time $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST 2>> $PREFIX.GPatch.err
+fi
 
 # Stats and dot plots
 printf "pre-break contig base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.contigs.bed) > $PREFIX.stats 2>> $PREFIX.GPatch.err
@@ -48,7 +57,11 @@ echo "Remapping to reference..."
 minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $PREFIX.cbreak.fa | samtools view -b - > $PREFIX.cbreak.bam 2>> $PREFIX.GPatch.err
 
 echo "Stage two genome patching..."
-time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak -w $WHITELIST 2>> $PREFIX.GPatch.err
+if [ $DROP_MISSING = true ]; then
+    time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak -w $WHITELIST -d 2>> $PREFIX.GPatch.err
+else
+    time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak -w $WHITELIST 2>> $PREFIX.GPatch.err
+fi
 
 # Stats and dot plots
 printf "post-break contig base count: %d\n" $(awk 'BEGIN {len=0} {len += ($3-$2)} END {print len}' $PREFIX.cbreak.contigs.bed) >> $PREFIX.stats 2>> $PREFIX.GPatch.err
