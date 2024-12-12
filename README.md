@@ -32,8 +32,8 @@ Installation from the github repository is not recommended. However, if you must
 
 ## Usage
 ```
-usage: GPatch [-h] -q SAM/BAM -r FASTA [-x BED] [-b FILENAME] [-m N]
-                       [-d N] [-f FLOAT] [-e FLOAT]
+usage: GPatch.py [-h] -q SAM/BAM -r FASTA [-x STR] [-b FILENAME] [-m N]
+                 [-w PATH] [-d]
 ```
 
 Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. Reference chromosomes with no mapped contigs are printed to output unchanged.
@@ -51,6 +51,8 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __-x STR, --prefix STR__ | Prefix to add to output file names. Default=None |
 | __-b FILENAME, --store_final_bam FILENAME__ | Store the final set of primary contig alignments to the given file name. Default: Do not store the final BAM. |
 | __-m N, --min_qual_score N__ | Minimum mapping quality score to retain an alignment. Default=30 |
+| __-w PATH, --whitelist PATH__ | Path to BED file containing whitelist regions: i.e., the inverse of blacklist regions. Supplying this will have the effect of excluding alignments that fall entirely within blacklist regions. Default=None |
+| __-d, --drop_missing__ | Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged. |
 
 
 ## Output
