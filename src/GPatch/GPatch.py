@@ -165,8 +165,8 @@ def main():
     parser.add_argument('-w', '--whitelist', metavar='PATH', type=str,
                         required=False, default=None,
                         help='Path to BED file containing whitelist regions: i.e., the inverse of blacklist regions. Supplying this will have the effect of excluding alignments that fall entirely within blacklist regions. Default=None')
-    parser.add_argument('-d', '--drop_missing', type=bool,
-                        required=False, default=False,
+    parser.add_argument('-d', '--drop_missing',
+                        required=False, default=False, action="store_true",
                         help='Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged.')
     
     args = parser.parse_args()
