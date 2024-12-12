@@ -29,6 +29,7 @@ dotplot(ali, label_seqs=TRUE, order_by="qstart")
 dev.off()
 
 # Individual chromosome dot plots
-chroms = paste("chr", c(1:22, "X", "Y"), sep="")
+# Only plot chromosomes present in the query genome!
+chroms = unique(ali[,"qname"])
 root_fname = paste(prefix, "dotplot", ref_name, sep=".")
 dotplot_all_chroms(ali, chroms, root_fname=root_fname)
