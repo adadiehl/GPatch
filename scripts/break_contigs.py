@@ -24,8 +24,11 @@ def parse_breakpoints(breakpoints_f):
                 ret[rec[3]].append(rec)
             else:
                 ret[rec[3]] = [rec]
+    # Breakpoints must be sorted in ascending order or
+    # not all breakpoints will be used!
+    for contig in ret:
+        ret[contig] = sorted(ret[contig], key = lambda x: (x[8], x[9]))
     return ret
-    
 
 
 def main():
@@ -66,10 +69,11 @@ def main():
                 if fstart < pos:
                     # Fragment overlaps previous fragment. Truncate at pos.
                     fstart = pos
-                if fstart >= fend:
-                    # Nested fragment. Skip.
-                    continue
-                if pos == 0 and fstart > pos:
+                    if fstart >= fend:
+                        # Nested fragment. Skip.
+                        continue
+                if fstart > pos:
+                    # Handle the fragment upstream of the current breakpoint.
                     fasta.seq = seq[pos:fstart-1]
                     fasta.id = root_id + '_' + str(frag)
                     sys.stdout.write("%s\n" % fasta.format("fasta"))

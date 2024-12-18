@@ -45,7 +45,9 @@ def contig_breakpoints_from_cigar(primary_alignments):
         chrom = contig.reference_name
         start = contig.reference_start
         end = contig.reference_end
+        #sys.stderr.write("%s\t%s\t%s\n" % (chrom, start, end))
         # Check for left and right soft-clips
+        #sys.stderr.write("%s\n%s\n" % (contig.cigartuples[0], contig.cigartuples[-1]))
         if contig.cigartuples[0][0] == 4:
             # left soft-clip
             start -= contig.cigartuples[0][1]
@@ -53,6 +55,7 @@ def contig_breakpoints_from_cigar(primary_alignments):
             # right soft-clip
             end += contig.cigartuples[-1][1]
         contig_breakpoints[contig.query_name] = [chrom, start, end, contig.query_name]
+        #sys.stderr.write("%s\n" % (contig_breakpoints))
 
     return contig_breakpoints
     
