@@ -299,14 +299,17 @@ def main():
 
             # Update the current position in the reference sequence if the
             # end position of the current contig is 3' of the current pos.
+            #sys.stderr.write("%s\t%s\t%s\n" % (pos, contig_breakpoints[contig.query_name][2], len(ref_seq.seq)))
             if contig_breakpoints[contig.query_name][2] > pos:
                 # This should always evaluate true in the absence of nested contigs.
                 pos = contig_breakpoints[contig.query_name][2]
-            
+                
         # Once the above loop finishes, we need to add the terminal segment
         # from the reference genome.
-        patched_seq = patched_seq + ref_seq.seq[pos:len(ref_seq.seq)]
-        patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, len(ref_seq.seq)))
+        if pos < len(ref_seq.seq):
+            #sys.stderr.write("%s\n" % (ref_seq.seq[pos:len(ref_seq.seq)]))
+            patched_seq = patched_seq + ref_seq.seq[pos:len(ref_seq.seq)]
+            patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, len(ref_seq.seq)))
 
         # Swap in the patched sequence for the reference sequence and print the result 
         ref_seq.seq = patched_seq
