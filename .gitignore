@@ -1,5 +1,6 @@
 *~
 src/GPatch/patch_genome.py
+src/GPatch.egg-info/
 .eggs
 build
 dist
