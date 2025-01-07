@@ -268,11 +268,16 @@ def main():
         patched_seq = ""
         for contig in contigs:
             rstart = contig_breakpoints[contig.query_name][1]
+            """
+            # This introduced a one-off error! We don't need to do this
+            # because all coordinates are already in proper zero-based form.
             if rstart > 0:
                 rstart -= 1
+            """
 
             # Check for overlapping/bookended contig mappings.
             qstart = 0  # Start of contig interval to append
+            #sys.stderr.write("%s\t%s\t%s\n" % (rstart, pos, pos-rstart))
             if rstart > pos:
                 # No overlap. Append the patch, in all lower-case
                 # for easy identification.
@@ -281,7 +286,9 @@ def main():
                 patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
             else:
                 # Handle overlapping contig ends by trimming the 5' end of
-                # this contig sequence by the length of the overlap.
+                # this contig sequence by the length of the overlap. Note this
+                # evaluates to zero if contigs are bookended (i.e., pos and
+                # rstart are equal.)
                 qstart = pos - rstart
                 
             # Append the contig sequence to the patched sequence string
