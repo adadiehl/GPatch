@@ -21,16 +21,25 @@ def create_primary_alignments_list(query_bam, min_qual_score):
     Extract all primary alignments from the BAM file and return
     as a list.
     """
+    #i = 0
+    #j = 0
+    #k = 0
+    #l = 0
     ret = []
     for aln in query_bam:
+        #i += 1
         if aln.is_unmapped:
             # Skip unmapped contigs
+            #j += 1
             continue
         if aln.mapping_quality < min_qual_score:
             # Skip low-quality mappings
+            #k += 1
             continue
         if not (aln.is_supplementary or aln.is_secondary):
+            #l += 1
             ret.append(aln)
+    #sys.stderr.write("%d\t%d\t%d\t%d\t%d\n" % (i, j, k, l, len(ret)))
     return ret
 
 
@@ -171,6 +180,9 @@ def main():
     parser.add_argument('-d', '--drop_missing',
                         required=False, default=False, action="store_true",
                         help='Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged.')
+    parser.add_argument('-t', '--no_trim',
+                        required=False, default=False, action="store_true",
+                        help='Do not trim the 5-prime end of contigs whose mappings overlap the previously-placed contig. Default: Overlapping contig sequence will be trimmed at the previous 3-prime contig breakpoint.')
     
     args = parser.parse_args()
 
@@ -207,6 +219,7 @@ def main():
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
         # Select all contigs mapped to this sequence.
         contigs = list(sorted_primary_alignments.fetch(ref_seq.id))
+        #sys.stderr.write("%s\t%s\n" % (ref_seq.id, contigs))
 
         # Convert the list of contigs into a list of tuples: (start, end, name),
         # representing the inferred contig breakpoints, sorted by start, then end position.
@@ -289,7 +302,8 @@ def main():
                 # this contig sequence by the length of the overlap. Note this
                 # evaluates to zero if contigs are bookended (i.e., pos and
                 # rstart are equal.)
-                qstart = pos - rstart
+                if not args.no_trim:
+                    qstart = pos - rstart
                 
             # Append the contig sequence to the patched sequence string
             contig_start = len(patched_seq)
