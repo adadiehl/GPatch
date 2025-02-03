@@ -304,7 +304,7 @@ def main():
                 # rstart are equal.)
                 if not args.no_trim:
                     qstart = pos - rstart
-                    if qstart > len(Seq(contig.query_sequence)))):
+                    if qstart > len(Seq(contig.query_sequence)):
                         # This should not happen, as it is indicative of a nested
                         # mapping, which should be filtered out prior to sequence-
                         # building. However, I have seen instances of nested mappings
