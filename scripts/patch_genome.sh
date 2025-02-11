@@ -9,8 +9,8 @@ ASSEMBLY_FASTA=$1
 REFERENCE_FASTA=$2
 REFERENCE_NAME=$3
 PREFIX=$4
-WHITELIST=$5
-GPATCH_ARGS=$6
+WHITELIST=$5  # Supply emtpy string ("") to disable whitelist
+GPATCH_ARGS=$6  # For supplying extra args to GPatch: "-d -t", e.g.
 
 PG_PATH=/data/projects/adadiehl/genome_patching/GPatch/src/GPatch
 SCRIPTS_PATH=/data/projects/adadiehl/genome_patching/GPatch/scripts
