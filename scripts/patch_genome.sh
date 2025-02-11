@@ -10,6 +10,7 @@ REFERENCE_FASTA=$2
 REFERENCE_NAME=$3
 PREFIX=$4
 WHITELIST=$5
+GPATCH_ARGS=$6
 
 PG_PATH=/data/projects/adadiehl/genome_patching/GPatch/src/GPatch
 SCRIPTS_PATH=/data/projects/adadiehl/genome_patching/GPatch/scripts
@@ -18,20 +19,15 @@ CBREAK_MAXDIST=2000000
 CBREAK_MAXCDIST=1000000
 CBREAK_MAXQDIST=1000000
 
-# Set this to false to retain reference chromosomes that containg
-# no mapped contigs in the results. These chromosomes will be
-# printed verbatim from the reference.
-DROP_MISSING=true
-
 # Initial mapping of the assembly genome and first-round of patching.
 echo "Initial mapping to reference..."
 minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $ASSEMBLY_FASTA | samtools view -b - > $PREFIX.bam 2> $PREFIX.GPatch.err
 
 echo "Initial genome patching..."
-if [ $DROP_MISSING = true ]; then
-    time $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST -d 2>> $PREFIX.GPatch.err
+if [ "${WHITELIST}" != "" ]; then
+    /usr/bin/time -v $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST $GPATCH_ARGS 2>> $PREFIX.GPatch.err
 else
-    time $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX -w $WHITELIST 2>> $PREFIX.GPatch.err
+    /usr/bin/time -v $PG_PATH/GPatch.py -q $PREFIX.bam -r $REFERENCE_FASTA -x $PREFIX $GPATCH_ARGS 2>> $PREFIX.GPatch.err
 fi
 
 # Stats and dot plots
