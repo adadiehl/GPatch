@@ -53,10 +53,10 @@ echo "Remapping to reference..."
 minimap2 -x asm20 -t 24 -a $REFERENCE_FASTA $PREFIX.cbreak.fa | samtools view -b - > $PREFIX.cbreak.bam 2>> $PREFIX.GPatch.err
 
 echo "Stage two genome patching..."
-if [ $DROP_MISSING = true ]; then
-    time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak -w $WHITELIST -d 2>> $PREFIX.GPatch.err
+if [ "${WHITELIST}" != "" ]; then
+    time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak -w $WHITELIST $GPATCH_ARGS 2>> $PREFIX.GPatch.err
 else
-    time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak -w $WHITELIST 2>> $PREFIX.GPatch.err
+    time $PG_PATH/GPatch.py -q $PREFIX.cbreak.bam -r $REFERENCE_FASTA -x $PREFIX.cbreak $GPATCH_ARGS 2>> $PREFIX.GPatch.err
 fi
 
 # Stats and dot plots
