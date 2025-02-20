@@ -31,6 +31,18 @@ def parse_breakpoints(breakpoints_f):
     return ret
 
 
+def extract_oriented_fragment(seq, start, end, is_reverse=False):
+    """
+    Extract the substring from the given sequence, returning
+    the raw sequence if is_reverse == False and the reverse-
+    complement if is_reverse == True.
+    """
+    subseq = seq[start:end]
+    if is_reverse:
+        subseq = subseq.reverse_complement()
+    return subseq
+
+
 def main():
     parser = ArgumentParser(description="Break contigs at breakpoints indicated in the given text file.")
     parser.add_argument('-f', '--fasta', metavar='FASTA', type=str,
@@ -55,7 +67,17 @@ def main():
             root_id = fasta.id
             pos = 0    # Start position in fasta sequence
             frag = 0   # Fragment number
-            for bp in breakpoints[fasta.id]:
+            contig_bp = breakpoints[fasta.id]
+            # Check for minus strand mappings. These need special-handling.
+            # These should be looped over in reverse, but for now we will
+            # just reverse-complement the whole seq and then do the same to
+            # each subseq before writing fasta output to restore the same
+            # strandedness.
+            is_reverse = False
+            if contig_bp[0][5] == "-":
+                is_reverse = True
+                seq = seq.reverse_complement()
+            for bp in contig_bp:
                 #sys.stderr.write("%s\n" % (bp))
                 # Need to calculate start and end of fragment from the start
                 # of the contig from genomic coordinates.
@@ -74,7 +96,8 @@ def main():
                         continue
                 if fstart > pos:
                     # Handle the fragment upstream of the current breakpoint.
-                    fasta.seq = seq[pos:fstart-1]
+                    subseq = extract_oriented_fragment(seq, pos, fstart-1, is_reverse=is_reverse)
+                    fasta.seq = subseq
                     fasta.id = root_id + '_' + str(frag)
                     sys.stdout.write("%s\n" % fasta.format("fasta"))
                     frag += 1
@@ -82,8 +105,9 @@ def main():
                     # Don't try to grab sequence past the end of the
                     # contig!
                     fend = len(seq)
-                    
-                fasta.seq = seq[fstart:fend]
+
+                subseq = extract_oriented_fragment(seq, fstart, fend, is_reverse=is_reverse)
+                fasta.seq = subseq
                 fasta.id = root_id + '_' + str(frag)
                 sys.stdout.write("%s\n" % fasta.format("fasta"))
                 frag += 1
@@ -92,7 +116,8 @@ def main():
             # Handle the last fragment in the contig
             if pos != len(seq):
                 #sys.stderr.write("%d\t%d\n" % (pos, len(seq)))
-                fasta.seq = seq[pos:len(seq)]
+                subseq = extract_oriented_fragment(seq, pos, len(seq), is_reverse=is_reverse)
+                fasta.seq = subseq
                 fasta.id = root_id + '_' + str(frag)
                 sys.stdout.write("%s\n" % fasta.format("fasta"))
             
