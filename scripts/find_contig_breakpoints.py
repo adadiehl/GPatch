@@ -91,7 +91,7 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
             #sys.stderr.write("%d\t%d\t%d\n" % (int(aln[7]), int(cluster[-1][8]), (int(cluster[-1][8]) + max_cluster_dist)))
             #sys.stderr.write("%s\t%s\n" % (aln[4], cluster[-1][4]))
             if int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist):
-                # Intervals overlap. Check for nesting, then strand.
+                # Mapped intervals overlap. Check for nesting, then strand.
                 #sys.stderr.write("%s\n" % (aln))
                 if int(aln[8]) <= int(cluster[-1][8]):
                     # Nested. Don't use!
@@ -100,7 +100,7 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
                     break
                 elif aln[4] == cluster[-1][4]:
                     # Same strand. Check distance between query positions.
-                    if int(aln[2]) - int(cluster[-1][3]) <= max_query_dist:
+                    if abs(int(aln[2]) - int(cluster[-1][3])) <= max_query_dist:
                         cluster.append(aln)
                         merged = True
                         #sys.stderr.write("After: %s\n\n" % (cluster))
