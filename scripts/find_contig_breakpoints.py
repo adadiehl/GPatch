@@ -89,16 +89,23 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
             #sys.stderr.write("\n%d Before: %s\n" % (idx,cluster))
             #sys.stderr.write("%s\n" % (aln))
             #sys.stderr.write("%d\t%d\t%d\n" % (int(aln[7]), int(cluster[-1][8]), (int(cluster[-1][8]) + max_cluster_dist)))
+            #sys.stderr.write("%s\n" % (cluster[-1]))
             #sys.stderr.write("%s\t%s\n" % (aln[4], cluster[-1][4]))
             if int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist):
                 # Mapped intervals overlap. Check for nesting, then strand.
+                """
+                This test was resulting in some alignments that should
+                have been their own cluster being dropped. On reflection
+                in this context, I'm not sure dropping nested mappings
+                is actually necessary/desirable.
+                """
                 #sys.stderr.write("%s\n" % (aln))
-                if int(aln[8]) <= int(cluster[-1][8]):
-                    # Nested. Don't use!
-                    #sys.stderr.write("nested\n\n")
-                    merged = True
-                    break
-                elif aln[4] == cluster[-1][4]:
+                #if int(aln[8]) <= int(cluster[-1][8]):
+                #    # Nested. Don't use!
+                #    #sys.stderr.write("nested\n\n")
+                #    merged = True
+                #    break
+                if aln[4] == cluster[-1][4]:
                     # Same strand. Check distance between query positions.
                     if abs(int(aln[2]) - int(cluster[-1][3])) <= max_query_dist:
                         cluster.append(aln)
@@ -130,6 +137,9 @@ def main():
     parser.add_argument('-q', '--max_query_dist', metavar='INT', type=int,
                         required=False, default=10000,
                         help='Maximum distance between query intervals to merge a partial alignment into a cluster. default = 10000')
+    parser.add_argument('-s', '--min_size', metavar='INT', type=int,
+                        required=False, default=1000000,
+                        help='Minimum size, in bp, to call an event and include this alignment in breakpoints.txt. Default=1000000')
     
     args = parser.parse_args()
 
@@ -162,8 +172,9 @@ def main():
                 starts, ends = get_sorted_starts_ends(cluster)
                 ldist = abs(starts[0] - int(contig[1])) 
                 rdist = abs(ends[-1] - int(contig[2]))
+                length = ends[-1] - starts[0]
                 #sys.stderr.write("%d\t%d\n" % (ldist, rdist))
-                if ldist <= args.max_dist or rdist <= args.max_dist:
+                if (ldist <= args.max_dist or rdist <= args.max_dist) and length >= args.min_size:
                     #sys.stderr.write("%s\n" % (cluster))
                     suspicious_clusters.append(cluster)
 
