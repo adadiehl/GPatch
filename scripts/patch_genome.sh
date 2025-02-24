@@ -46,7 +46,7 @@ $SCRIPTS_PATH/create_dotplots.Rscript $PREFIX.patched.$REFERENCE_NAME.paf $PREFI
 # Automated location of suspicious rearrangement breakpoints that
 # are likely misassemblies. Note we overwrite original results here.
 echo "Finding suspicious rearrangement breakpoints..."
-$SCRIPTS_PATH/find_contig_breakpoints.py -c $PREFIX.contigs.bed -p $PREFIX.patched.$REFERENCE_NAME.paf -d $CBREAK_MAXCDIST -q $CBREAK_MAXQDIST -m $CBREAK_MAXDIST -s $CBREAK_MINSIZE > $PREFIX.breakpoints.txt 2>> $PREFIX.GPatch.err
+$SCRIPTS_PATH/find_contig_breakpoints.py -c $PREFIX.contigs.bed -p $PREFIX.patched.$REFERENCE_NAME.paf -d $CBREAK_MAXCDIST -q $CBREAK_MAXQDIST -m $CBREAK_MAXDIST -s $CBREAK_MINSIZE -a > $PREFIX.breakpoints.txt 2>> $PREFIX.GPatch.err
 echo "Breaking contigs at suspicious rearrangement breakpoints..."
 $SCRIPTS_PATH/break_contigs.py -f $ASSEMBLY_FASTA -b $PREFIX.breakpoints.txt > $PREFIX.cbreak.fa 2>> $PREFIX.GPatch.err
 
