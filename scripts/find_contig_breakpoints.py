@@ -91,7 +91,10 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
             #sys.stderr.write("%d\t%d\t%d\n" % (int(aln[7]), int(cluster[-1][8]), (int(cluster[-1][8]) + max_cluster_dist)))
             #sys.stderr.write("%s\n" % (cluster[-1]))
             #sys.stderr.write("%s\t%s\n" % (aln[4], cluster[-1][4]))
-            if int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist):
+            if aln[5] != cluster[-1][0]:
+                # Alignment to a different chromosome.
+                merged = False
+            elif int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist) and aln[5] == cluster[-1][0]:
                 # Mapped intervals overlap. Check for nesting, then strand.
                 """
                 This test was resulting in some alignments that should
@@ -140,11 +143,16 @@ def main():
     parser.add_argument('-s', '--min_size', metavar='INT', type=int,
                         required=False, default=1000000,
                         help='Minimum size, in bp, to call an event and include this alignment in breakpoints.txt. Default=1000000')
+    parser.add_argument('-a', '--all_chroms', default=False, action="store_true",
+                        required=False, help="Find breakpoints for rearrangements across all chromosomes, not just intrachromosomal rearrangements. Default=Find only intrachromosomal breakpoints.")
     
     args = parser.parse_args()
 
-    # Load up all partial alignments between the same query and target chromosome
-    paf = parse_paf(args.paf, matched_only = True)
+    # Load up all partial alignments overlapping the contig
+    matched_only = True
+    if args.all_chroms == True:
+        matched_only = False
+    paf = parse_paf(args.paf, matched_only = matched_only)
 
     with open(args.contigs, "r") as contigs:
         for line in contigs:
