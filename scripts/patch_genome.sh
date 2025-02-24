@@ -15,9 +15,10 @@ GPATCH_ARGS=$6  # For supplying extra args to GPatch: "-d -t", e.g.
 PG_PATH=/data/projects/adadiehl/genome_patching/GPatch/src/GPatch
 SCRIPTS_PATH=/data/projects/adadiehl/genome_patching/GPatch/scripts
 
-CBREAK_MAXDIST=2000000
-CBREAK_MAXCDIST=1000000
-CBREAK_MAXQDIST=1000000
+CBREAK_MAXDIST=20000000
+CBREAK_MAXCDIST=100000
+CBREAK_MAXQDIST=100000
+CBREAK_MINSIZE=1000000
 
 # Initial mapping of the assembly genome and first-round of patching.
 echo "Initial mapping to reference..."
@@ -45,7 +46,7 @@ $SCRIPTS_PATH/create_dotplots.Rscript $PREFIX.patched.$REFERENCE_NAME.paf $PREFI
 # Automated location of suspicious rearrangement breakpoints that
 # are likely misassemblies. Note we overwrite original results here.
 echo "Finding suspicious rearrangement breakpoints..."
-$SCRIPTS_PATH/find_contig_breakpoints.py -c $PREFIX.contigs.bed -p $PREFIX.patched.$REFERENCE_NAME.paf -d $CBREAK_MAXCDIST -q $CBREAK_MAXQDIST -m $CBREAK_MAXDIST > $PREFIX.breakpoints.txt 2>> $PREFIX.GPatch.err
+$SCRIPTS_PATH/find_contig_breakpoints.py -c $PREFIX.contigs.bed -p $PREFIX.patched.$REFERENCE_NAME.paf -d $CBREAK_MAXCDIST -q $CBREAK_MAXQDIST -m $CBREAK_MAXDIST -s $CBREAK_MINSIZE > $PREFIX.breakpoints.txt 2>> $PREFIX.GPatch.err
 echo "Breaking contigs at suspicious rearrangement breakpoints..."
 $SCRIPTS_PATH/break_contigs.py -f $ASSEMBLY_FASTA -b $PREFIX.breakpoints.txt > $PREFIX.cbreak.fa 2>> $PREFIX.GPatch.err
 
