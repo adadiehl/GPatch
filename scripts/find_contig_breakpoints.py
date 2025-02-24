@@ -91,10 +91,10 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
             #sys.stderr.write("%d\t%d\t%d\n" % (int(aln[7]), int(cluster[-1][8]), (int(cluster[-1][8]) + max_cluster_dist)))
             #sys.stderr.write("%s\n" % (cluster[-1]))
             #sys.stderr.write("%s\t%s\n" % (aln[4], cluster[-1][4]))
-            if aln[5] != cluster[-1][0]:
+            if aln[5] != cluster[-1][5]:
                 # Alignment to a different chromosome.
                 merged = False
-            elif int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist) and aln[5] == cluster[-1][0]:
+            elif int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist) and aln[5] == cluster[-1][5]:
                 # Mapped intervals overlap. Check for nesting, then strand.
                 """
                 This test was resulting in some alignments that should
