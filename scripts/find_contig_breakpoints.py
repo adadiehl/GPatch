@@ -80,7 +80,8 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
     in the cluster likely come from the same event. Assumes all
     alignments are between the same query and target chromosome.
     """
-    sorted_alignments = sorted(alignments, key = lambda x: (int(x[7]), int(x[8])))
+    sorted_alignments = sorted(alignments, key = lambda x: (x[5], int(x[7]), int(x[8])))
+    #sys.stderr.write("%s\n\n" % (sorted_alignments))
     clusters = []
     for aln in sorted_alignments:
         #sys.stderr.write("%s\n" % (aln))
@@ -96,19 +97,14 @@ def cluster_on_mapped_then_query_pos(alignments, max_cluster_dist = 0, max_query
                 merged = False
             elif int(aln[7]) <= (int(cluster[-1][8]) + max_cluster_dist) and aln[5] == cluster[-1][5]:
                 # Mapped intervals overlap. Check for nesting, then strand.
-                """
-                This test was resulting in some alignments that should
-                have been their own cluster being dropped. On reflection
-                in this context, I'm not sure dropping nested mappings
-                is actually necessary/desirable.
-                """
-                #sys.stderr.write("%s\n" % (aln))
-                #if int(aln[8]) <= int(cluster[-1][8]):
-                #    # Nested. Don't use!
-                #    #sys.stderr.write("nested\n\n")
-                #    merged = True
-                #    break
-                if aln[4] == cluster[-1][4]:
+                if int(aln[8]) <= int(cluster[-1][8]) and aln[4] == cluster[-1][4]:
+                    # Nested. Need to do some more checks to see if we want to merge
+                    # as rearrangments can sometimes "hide" inside nested mappings.
+                    #sys.stderr.write("nested\n\n")
+                    # Check to see if the alignment ends within the max_cluster_dist
+                    if abs(int(cluster[-1][8]) - int(aln[8])) >= max_cluster_dist:
+                        merged = False
+                elif aln[4] == cluster[-1][4]:
                     # Same strand. Check distance between query positions.
                     if abs(int(aln[2]) - int(cluster[-1][3])) <= max_query_dist:
                         cluster.append(aln)
