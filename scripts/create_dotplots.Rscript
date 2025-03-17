@@ -22,14 +22,15 @@ dotplot_all_chroms = function(ali, chroms, root_fname = "") {
 
 ali = read_paf(path_to_ali)
 
+# Get the list of all chromosomes in both genomes.
+chroms = intersect(unique(ali[,"qname"]), unique(ali[,"tname"]))
+
 # All vs. All dot plot
 pdf_name = paste(prefix, "dotplot", ref_name, "all.pdf", sep=".")
 pdf(pdf_name)
-dotplot(ali, label_seqs=TRUE, order_by="qstart")
+dotplot(ali, label_seqs=TRUE, order_by="provided", ordering=list(chroms, chroms))
 dev.off()
 
 # Individual chromosome dot plots
-# Only plot chromosomes present in both genomes!
-chroms = intersect(unique(ali[,"qname"]), unique(ali[,"tname"]))
 root_fname = paste(prefix, "dotplot", ref_name, sep=".")
 dotplot_all_chroms(ali, chroms, root_fname=root_fname)
