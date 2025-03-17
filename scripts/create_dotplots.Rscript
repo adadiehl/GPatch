@@ -22,7 +22,7 @@ dotplot_all_chroms = function(ali, chroms, root_fname = "") {
 
 ali = read_paf(path_to_ali)
 
-# Get the list of all chromosomes in both genomes.
+# Get the list of all chromosomes present in both genomes.
 chroms = intersect(unique(ali[,"qname"]), unique(ali[,"tname"]))
 
 # All vs. All dot plot
