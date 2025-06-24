@@ -68,4 +68,6 @@ GPatch produces three output files:
 ## Citing GPatch
 Please use the following citation if you use this software in your work:
 
-CITATION_HERE
+Fast and Accurate Draft Genome Patching with GPatch
+Adam Diehl, Alan Boyle
+bioRxiv 2025.05.22.655567; doi: https://doi.org/10.1101/2025.05.22.655567
