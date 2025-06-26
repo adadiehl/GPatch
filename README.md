@@ -53,7 +53,7 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __-m N, --min_qual_score N__ | Minimum mapping quality score to retain an alignment. Default=30 |
 | __-w PATH, --whitelist PATH__ | Path to BED file containing whitelist regions: i.e., the inverse of blacklist regions. Supplying this will have the effect of excluding alignments that fall entirely within blacklist regions. Default=None |
 | __-d, --drop_missing__ | Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged. |
-
+| __-t, --no_trim__ | Do not trim the 5-prime end of contigs whose mappings overlap the previously-placed contig. Default: Overlapping contig sequence will be trimmed at the previous 3-prime contig breakpoint. |
 
 ## Output
 
