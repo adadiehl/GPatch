@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import sys, os, re
-from argparse import ArgumentParser
+from argparse import ArgumentParser, SUPPRESS
 from Bio import SeqIO
 from Bio.Seq import Seq
 import pysam
@@ -148,6 +148,7 @@ def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
                         cluster.append(contig)
                     else:
                         #sys.stderr.write("\tnested\n")
+                        #sys.stderr.write("\t%s\n\t%s\n" % (cluster[-1], contig))
                         pass
                 else:
                     cluster.append(contig)
@@ -160,7 +161,7 @@ def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
 
 
 def main():
-    parser = ArgumentParser(description="Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference.")
+    parser = ArgumentParser(description="Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. By default, reference chromosomes with no mapped contigs are printed to output unchanged. Use the --drop_missing option to disable this behavior. By default, patches are applied to the 5' and 3' telomere ends of pseudochromsomes if the first and last contig alignments do not extend to the start/end of the chromsome. In some cases, this may cause spurious duplications. Use the --no_extend option if this is a concern. Note tht GPatch is designed to be run on single-haplotype or unphased genome assemblies. For phased assemblies, each haplotype should be separated into its own input FASTA file prior to alignment. GPatch can then be run separately on the BAM files for each haplotype to obtain phased pseudoassemblies, otherwise results will be unpredictable and likely incorrect.")
     parser.add_argument('-q', '--query_bam', metavar='SAM/BAM', type=str,
                         required=True, help='Path to SAM/BAM file containing non-overlapping contig mappings to the reference genome.')
     parser.add_argument('-r', '--reference_fasta', metavar='FASTA', type=str,
@@ -180,9 +181,25 @@ def main():
     parser.add_argument('-d', '--drop_missing',
                         required=False, default=False, action="store_true",
                         help='Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged.')
+    # Note the --no_trim option is deprecated in versions 0.4.0. Trimming
+    # is disabled as it had universally negative effects in our testing
+    # and should not be used.
     parser.add_argument('-t', '--no_trim',
+                        required=False, default=True, action="store_true",
+                        #help='Do not trim the 5-prime end of contigs whose mappings overlap the previously-placed contig. Default: Overlapping contig sequence will be trimmed at the previous 3-prime contig breakpoint.')
+                        help=SUPPRESS)
+    parser.add_argument('-s', '--scaffold_only',
                         required=False, default=False, action="store_true",
-                        help='Do not trim the 5-prime end of contigs whose mappings overlap the previously-placed contig. Default: Overlapping contig sequence will be trimmed at the previous 3-prime contig breakpoint.')
+                        help='Pad gaps between placed contigs with strings of N characters instead of patching with sequence from the reference assembly. Effectively turns GPatch into a reference-guided scaffolding tool. Note that patches.bed will still be generated to document (inverse) mapped contig boundaries in reference frame.')
+    parser.add_argument('-l', '--gap_length', metavar='N', type=int,
+                        required=False, default=-1,
+                        help='Length of "N" gaps separating placed gontigs when using --scaffold_only. Has no effect when in default patching mode. Default=Estimate gap length from alignment.')
+    parser.add_argument('-e', '--no_extend',
+                        required=False, default=False, action="store_true",
+                        help='Do not patch telomere ends of pseudochromosomes with reference sequence upstream of the first mapped contig and downstream of the last mapped contig. Default is to include 5\' and 3\' patches to extend telomeres to the ends implied by the alignment.')
+    parser.add_argument('-k', '--keep_nested',
+                        required=False, default=False, action="store_true",
+                        help='Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs.')
     
     args = parser.parse_args()
 
@@ -213,7 +230,8 @@ def main():
         os.rename(filtered_bam + '.bai', sorted_primary_alignments_bam + ".bai")
 
     # Check for nested/overlapping alignment spaces among the remaining contigs.
-    sys.stderr.write("Checking for nested or overlapping contigs...\n")
+    if not args.keep_nested:
+        sys.stderr.write("Checking for nested contigs...\n")
     sorted_primary_alignments = pysam.AlignmentFile(sorted_primary_alignments_bam, "rb")
     final_alignments = []
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
@@ -226,7 +244,10 @@ def main():
         sorted_contig_intervals = contigs_to_sorted_interval_list(contigs, contig_breakpoints)
         
         # Cluster the linear intervals on overlap, leaving out nested contigs
-        clusters = cluster_contig_positions(sorted_contig_intervals, drop_nested=True)
+        drop_nested = True
+        if args.keep_nested:
+            drop_nested = False
+        clusters = cluster_contig_positions(sorted_contig_intervals, drop_nested=drop_nested)
 
         # Next thing to do is to push all retained contigs across clusters into
         # a final list of useful contigs. Since pysam.fetch does not allow
@@ -294,14 +315,30 @@ def main():
             if rstart > pos:
                 # No overlap. Append the patch, in all lower-case
                 # for easy identification.
-                patched_seq = patched_seq + ref_seq.seq[pos:rstart].lower()
-                # Write patch coordinates in reference frame to patches_bed
-                patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
+                patch = ""
+                if args.scaffold_only:
+                    # Use a string of N characters the length of the patch instead
+                    # of an actual patch.
+                    if args.gap_length >= 0:
+                        patch = "n" * args.gap_length
+                    else:
+                        patch = "n" * (rstart-pos)
+                else:
+                    patch = ref_seq.seq[pos:rstart].lower()
+                if pos == 0 and args.no_extend:
+                    pass
+                else:
+                    patched_seq = patched_seq + patch
+                    # Write patch coordinates in reference frame to patches_bed
+                    patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
             else:
                 # Handle overlapping contig ends by trimming the 5' end of
                 # this contig sequence by the length of the overlap. Note this
                 # evaluates to zero if contigs are bookended (i.e., pos and
                 # rstart are equal.)
+                #
+                # NOTE THAT THIS BEHAVIOR IS DEPRECATED AND THE OPTION TO TRIM
+                # IS DISABLED IN VERSIONS 0.4.0 AND GREATER.
                 if not args.no_trim:
                     qstart = pos - rstart
                     if qstart > len(Seq(contig.query_sequence)):
@@ -337,7 +374,7 @@ def main():
                 
         # Once the above loop finishes, we need to add the terminal segment
         # from the reference genome.
-        if pos < len(ref_seq.seq):
+        if pos < len(ref_seq.seq) and not args.no_extend:
             #sys.stderr.write("%s\n" % (ref_seq.seq[pos:len(ref_seq.seq)]))
             patched_seq = patched_seq + ref_seq.seq[pos:len(ref_seq.seq)]
             patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, len(ref_seq.seq)))

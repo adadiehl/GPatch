@@ -36,7 +36,7 @@ usage: GPatch.py [-h] -q SAM/BAM -r FASTA [-x STR] [-b FILENAME] [-m N]
                  [-w PATH] [-d]
 ```
 
-Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. Reference chromosomes with no mapped contigs are printed to output unchanged.
+Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. By default, reference chromosomes with no mapped contigs are printed to output unchanged. Use the --drop_missing option to disable this behavior. By default, patches are applied to the 5' and 3' telomere ends of pseudochromsomes if the first and last contig alignments do not extend to the start/end of the chromsome. In some cases, this may cause spurious duplications. Use the --no_extend option if this is a concern. Note tht GPatch is designed to be run on single-haplotype or unphased genome assemblies. For phased assemblies, each haplotype should be separated into its own input FASTA file prior to alignment. GPatch can then be run separately on the BAM files for each haplotype to obtain phased pseudoassemblies, otherwise results will be unpredictable and likely incorrect.
 
 #### Required Arguments
 | Argument | Description |
@@ -53,7 +53,10 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __-m N, --min_qual_score N__ | Minimum mapping quality score to retain an alignment. Default=30 |
 | __-w PATH, --whitelist PATH__ | Path to BED file containing whitelist regions: i.e., the inverse of blacklist regions. Supplying this will have the effect of excluding alignments that fall entirely within blacklist regions. Default=None |
 | __-d, --drop_missing__ | Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged. |
-| __-t, --no_trim__ | Do not trim the 5-prime end of contigs whose mappings overlap the previously-placed contig. Default: Overlapping contig sequence will be trimmed at the previous 3-prime contig breakpoint. |
+| __-s, --scaffold_only__ | Pad gaps between placed contigs with strings of N characters instead of patching with sequence from the reference assembly. Effectively turns GPatch into a reference-guided scaffolding tool. Note that patches.bed will still be generated to document (inverse) mapped contig boundaries in reference frame. |
+| __-l N, --gap_length N__ | Length of "N" gaps separating placed gontigs when using --scaffold_only. Has no effect when in default patching mode. Default=Estimate gap length from alignment. |
+| __-e, --no_extend__ | Do not patch telomere ends of pseudochromosomes with reference sequence upstream of the first mapped contig and downstream of the last mapped contig. Default is to include 5' and 3' patches to extend telomeres to the ends implied by the alignment. |
+| __-k, --keep_nested__ | Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs. |
 
 ## Output
 
