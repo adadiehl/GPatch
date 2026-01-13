@@ -199,7 +199,7 @@ def main():
                         help='Do not patch telomere ends of pseudochromosomes with reference sequence upstream of the first mapped contig and downstream of the last mapped contig. Default is to include 5\' and 3\' patches to extend telomeres to the ends implied by the alignment.')
     parser.add_argument('-k', '--keep_nested',
                         required=False, default=False, action="store_true",
-                        help='Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs.')
+                        help='Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs. This option should be used with caution as these mappings cannot be placed unambigiously relative to other mapped contigs, thus including them is likely to lead to unpredictable and possibly incorrect results. Do not use this unless you are sure you know what you are doing!')
     
     args = parser.parse_args()
 

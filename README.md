@@ -56,7 +56,7 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __-s, --scaffold_only__ | Pad gaps between placed contigs with strings of N characters instead of patching with sequence from the reference assembly. Effectively turns GPatch into a reference-guided scaffolding tool. Note that patches.bed will still be generated to document (inverse) mapped contig boundaries in reference frame. |
 | __-l N, --gap_length N__ | Length of "N" gaps separating placed gontigs when using --scaffold_only. Has no effect when in default patching mode. Default=Estimate gap length from alignment. |
 | __-e, --no_extend__ | Do not patch telomere ends of pseudochromosomes with reference sequence upstream of the first mapped contig and downstream of the last mapped contig. Default is to include 5' and 3' patches to extend telomeres to the ends implied by the alignment. |
-| __-k, --keep_nested__ | Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs. |
+| __-k, --keep_nested__ | Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs. This option should be used with caution as these mappings cannot be placed unambigiously relative to other mapped contigs, thus including them is likely to lead to unpredictable and possibly incorrect results. Do not use this unless you are sure you know what you are doing! |
 
 ## Output
 
