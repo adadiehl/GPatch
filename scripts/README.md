@@ -27,7 +27,7 @@ Script to automate a GPatch workflow incuding the following analysis stages:
 8) Realignment of the final patched pseudoassembly to the reference assembly
 9) Generation of dot-plots between the final patched pseudoassembly and reference assembly
 
-Stats on patched genome composition are calculated after both patching stages and collected in <PREFIX>.stats
+Stats on patched genome composition are calculated after both patching stages and collected in \<PREFIX\>.stats
 
 #### Usage
 ```
@@ -47,11 +47,50 @@ Note that, before use, you must edit the PG_PATH and SCRIPTS_PATH variables with
 #### Optional Arguments
 | Argument | Description |
 |---|---|
-| __GPATCH_ARGS__ | Additional optional arguments to GPatch. e.g., "-d -s" See GPatch usage information on the main README.md for available options. |
+| __GPATCH_ARGS__ | Additional optional arguments to GPatch. i.e., "-d -s" See GPatch usage information on the main README.md for available options. |
 
 Also note that the number of mapping threads (defautl 24) and assembly mode (default asm20) for minimap2 may be specified by editing the THREADS and/or ASM_MODE variables within patch_genome.sh
 
-### 
+### find_contig_breakpoints.py
+
+Given an alignment of a patched pseudoassembly to a reference assembly, locate likely misjoins within the component contigs and generate a text file with their breakpoint coordinates.
+
+#### Usage
+```
+find_contig_breakpoints.py [-h] -c BED -p PATH [-m INT] [-t INT] [-d INT] [-q INT] [-s INT] [-a]
+```
+
+#### Required Arguments
+| Argument | Description |
+|---|---|
+| __-c BED, --contigs BED__ | Path to contigs.bed containing contig mappings within the current patched genome. |
+| __-p PATH, --paf PATH__ | PAF alignment of the current patched genome to the reference genome. |
+
+#### Optional Arguments
+| Argument | Description |
+|---|---|
+| __-h, --help__ | show this help message and exit |
+| __-m INT, --max_dist INT__ | Maximum distance, in bp, from the contig end to a potential breakpoint to consider it likely spurious and include this in breakpoints.txt. Default=1000 |
+| __-t INT, --min_trans_dist INT__ | Minimum distance, in bp, from the query position to the mapped position in the reference to call a likely translocation and include this alignment in breakpoints.txt. Default=1000000 |
+| __-d INT, --max_cluster_dist INT__ | Maximum distance between mapped positions to merge a partial alignment into a cluster. default = 0 |
+| __-q INT, --max_query_dist INT__ | Maximum distance between query intervals to merge a partial alignment into a cluster. default = 10000 |
+| __-s INT, --min_size INT__ | Minimum size, in bp, to call an event and include this alignment in breakpoints.txt. Default=1000000 |
+| __-a, --all_chroms__  | Find breakpoints for rearrangements across all chromosomes, not just intrachromosomal rearrangements. Default=Find only intrachromosomal breakpoints. |
+
+#### Output
+| File | Description |
+|---|---|
+| __breakpoints.txt__ | A text file describing the breakpoint coordinates of likely misjoins. See below for column definitions. |
+
+| Column | Description |
+|---|---|
+| 1-3 | Coordinates of misjoin breakpoints within the patched pseudoassembly. |
+| 4 | Name of the contig harboring the misjoin. |
+| 5 | Score. Not used. |
+| 6 | Orientation of the contig mapping within the patched pseudoassembly. |
+| 7-8 | Contig-level start and end positions of the placed contig fragment. |
+| 9-10 | Coordinates of misjoin breakpoints within the contig. |
+| 11 | Misjoin type. TRS=Translocation, INT=Inversion, INT=Inverted Translocation, TRD=Translocation from different chromosome. |
 
 ## Citing GPatch Helper Scripts
 Please use the following citation if you use this software in your work:
