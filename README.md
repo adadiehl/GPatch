@@ -67,6 +67,9 @@ GPatch produces three output files:
 | __contigs.bed__ | Location of contigs in the coordinate frame of the patched genome. |
 | __patches.bed__ | Location of patches in the coordinate frame of the reference genome. |
 
+## Helper Scripts
+
+The scripts directory contains helper scripts for running GPatch and working with its output, including a shell script to automate a two-stage patching process, including initial alignment and patching steps, misjoin breakpoint prediction and contig-breaking, and subsequent realignment and patching of the split contigs, with dot-plots against the reference assembly created after both patching stages. In addition, scripts are provided to generate a chrom.sizes file for a patched pseudoassembly and a set of liftover chains that can be used to translate features mapped to the unpatched contigs to the patched pseudoassembly. Please see the README.md within the scripts for detailed usage information.
 
 ## Citing GPatch
 Please use the following citation if you use this software in your work:
