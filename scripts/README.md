@@ -142,6 +142,45 @@ create_dotplots.Rscript <patched_to_reference.paf> <CTG_NAME> <REF_NAME>
 Output is written as individual image files, in PDF format, for each matching chromosome in the patched pseudoassenbly and reference assembly, with naming convention <CTG_NAME>.dotplot.<REF_NAME>.<CHR>.pdf.
 
 
+### generate_chrom_sizes.sh
+
+Generate a chrom.sizes file for all chromosomes in the given (pseudo)assembly.
+
+#### Usage
+```
+bash generate_chrom_sizes.sh <ASSY_FASTA> <CHROM_SIZES>
+```
+
+#### Required Arguments
+| Argument | Description |
+|---|---|
+| __ASSY_FASTA__ | Path to the (pseudo)assembly. |
+| __CHROM_SIZES__ | Filename/path to write chrom.sizes entries to. |
+
+#### Output
+Standard two-column chrom.sizes are written to the output file given with the \<CHROM_SIZES\> argument.
+
+
+### liftover_chain_from_contigs.py
+
+Create a set of liftover chains that can be used to translate annotations from the coordinate frame of the unpatched contig-level genome assembly to the coordinate frame of the patched pseudoassembly.
+
+#### Required Arguments
+| Argument | Description |
+|---|---|
+| __-c BED, --contigs_bed BED | Path to the contigs.bed file created by GPatch for the final patched genome. |
+| __-s CHROM.SIZES, --chrom_sizes CHROM.SIZES__ | Path to chrom.sizes file for the final patched genome. Can be generated with build_chrom_sizes.sh. |
+
+#### Optional Arguments
+| Argument | Description |
+|---|---|
+| __-h, --help__ | show this help message and exit |
+
+#### Output
+A set of liftover chains suitable for translating annotations from the coordinate frame of the unpatched contig-level genome assembly \
+to the coordinate frame	of the patched pseudoassembly.
+
+
 ## Citing GPatch Helper Scripts
 Please use the following citation if you use this software in your work:
 
