@@ -122,6 +122,26 @@ break_contigs.py [-h] -f FASTA -b PATH [-m FASTA]
 Output in FASTA format are written to stdout.
 
 
+### create_dotplots.Rscript
+
+Generate dot plots between all patched pseudochromosomes and corresponding reference chromosomes.
+
+#### Usage
+```
+create_dotplots.Rscript <patched_to_reference.paf> <CTG_NAME> <REF_NAME>
+```
+
+#### Required Arguments
+| Argument | Description |
+|---|---|
+| __patched_to_reference.paf__ | PAF format alignment of the patched pseudoassembly to the reference assembly. |
+| __CTG_NAME__ | Name of the contig-level draft assembly, e.g., NA12878.1. Used as axis labels in the dot-plot and in ouput file naming. |
+| __REF_NAME__ | Name of the reference assembly, e.g., hg38. Used as axis labels in the dot-plot and in ouput file naming. |
+
+#### Output
+Output is written as individual image files, in PDF format, for each matching chromosome in the patched pseudoassenbly and reference assembly, with naming convention <CTG_NAME>.dotplot.<REF_NAME>.<CHR>.pdf.
+
+
 ## Citing GPatch Helper Scripts
 Please use the following citation if you use this software in your work:
 
