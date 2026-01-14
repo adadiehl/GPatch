@@ -32,7 +32,7 @@ def main():
         version="0.3.8",
         author="Adam Diehl",
         author_email="adadiehl@umich.edu",
-        description="Assemble contigs into a chromosome-scalse pseudo-assembly using alignments to a reference sequence.",
+        description="Assemble contigs into a chromosome-scalse pseudo-assembly using alignments to a reference sequence. Download the github repository for helper scripts to automate GPatch workflows, identify and correct misjoins in the contig assembly, produce dot-plots of patched pseudoassemblies to a reference assembly, and generate chrom.sizes and liftover chains for patched pseudoassemblies.",
         long_description=readme(),
         long_description_content_type="text/markdown",
         url="https://github.com/adadiehl/GPatch",
