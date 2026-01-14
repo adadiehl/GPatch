@@ -263,9 +263,13 @@ def main():
                 final_alignments.append(contig)
 
     sorted_primary_alignments.close()
-                    
+
+    # Clean up the initial sorted BAM and index files.
+    os.remove(sorted_primary_alignments_bam)
+    os.remove(sorted_primary_alignments_bam + '.bai')
+    
     # Write the final set of alignments to a sorted BAM file
-    sorted_primary_alignments_bam = sorted_bam_from_aln_list(final_alignments, query_bam.header, sorted_bam_name=args.store_final_bam)                
+    sorted_primary_alignments_bam = sorted_bam_from_aln_list(final_alignments, query_bam.header, sorted_bam_name=args.store_final_bam)
     pysam.index(sorted_primary_alignments_bam)
         
     # Set up output streams for fasta, patches.bed, and contigs.bed
