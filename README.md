@@ -32,8 +32,7 @@ Installation from the github repository is not recommended. However, if you must
 
 ## Usage
 ```
-usage: GPatch.py [-h] -q SAM/BAM -r FASTA [-x STR] [-b FILENAME] [-m N]
-                 [-w PATH] [-d]
+GPatch.py [-h] -q SAM/BAM -r FASTA [-x STR] [-b FILENAME] [-m N] [-w PATH] [-d] [-s] [-l N] [-e] [-k]
 ```
 
 Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. By default, reference chromosomes with no mapped contigs are printed to output unchanged. Use the --drop_missing option to disable this behavior. By default, patches are applied to the 5' and 3' telomere ends of pseudochromsomes if the first and last contig alignments do not extend to the start/end of the reference chromsome. In some cases, this may cause spurious duplications. Use the --no_extend option if this is a concern. Note that GPatch is designed to be run on single-haplotype or unphased genome assemblies. For phased assemblies, each haplotype should be separated into its own input FASTA file prior to alignment. GPatch can then be run separately on the BAM files for each haplotype to obtain phased pseudoassemblies, otherwise results will be unpredictable and likely incorrect.
