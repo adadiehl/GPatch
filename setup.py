@@ -28,7 +28,7 @@ def readme():
 def main():
 
     metadata = dict(
-        name="GPatch",
+        name="gpatch",
         version="0.4.0",
         author="Adam Diehl",
         author_email="adadiehl@umich.edu",

@@ -8,6 +8,6 @@ bump2version --list $1
 
 # Update PyPI
 python3 setup.py sdist bdist_wheel
-python3 -m twine upload dist/GPatch-$(cat VERSION)*
+python3 -m twine upload dist/gpatch-$(cat VERSION)*
 
 # Update BioConda
