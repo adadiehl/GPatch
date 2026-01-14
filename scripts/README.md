@@ -11,6 +11,7 @@ This directory contains helper scripts for running GPatch and working with its o
 * minimap2 (https://github.com/lh3/minimap2)
 * R (https://www.r-project.org/) and pafr (https://github.com/dwinter/pafr) for	dot-plot generation
 
+
 ## The scripts
 
 ### patch_genome.sh
@@ -50,6 +51,7 @@ Note that, before use, you must edit the PG_PATH and SCRIPTS_PATH variables with
 | __GPATCH_ARGS__ | Additional optional arguments to GPatch. i.e., "-d -s" See GPatch usage information on the main README.md for available options. |
 
 Also note that the number of mapping threads (defautl 24) and assembly mode (default asm20) for minimap2 may be specified by editing the THREADS and/or ASM_MODE variables within patch_genome.sh
+
 
 ### find_contig_breakpoints.py
 
@@ -91,6 +93,34 @@ find_contig_breakpoints.py [-h] -c BED -p PATH [-m INT] [-t INT] [-d INT] [-q IN
 | 7-8 | Contig-level start and end positions of the placed contig fragment. |
 | 9-10 | Coordinates of misjoin breakpoints within the contig. |
 | 11 | Misjoin type. TRS=Translocation, INT=Inversion, INT=Inverted Translocation, TRD=Translocation from different chromosome. |
+
+Note that this file may be edited to remove individual breakpoints if it is believed they represent legitimate structural variants in the contig-level assembly.
+
+
+### break_contigs.py
+
+Given a contig-level assembly and breakpoints.txt file from find_contig_breakpoints.py, break contigs at the boundaries of likely misjoins and write results to a new fasta file.
+
+#### Usage
+```
+break_contigs.py [-h] -f FASTA -b PATH [-m FASTA]
+```
+
+#### Required Arguments
+| Argument | Description |
+|---|---|
+| __-f FASTA, --fasta FASTA__ | Path to genome assembly fasta containing contigs to break. |
+| __-b PATH, --breakpoints PATH__ | Path to text file containing breakpoints for each contig to break. Only supports one breakpoint per contig, at present. Contigs without an entry in this file will be printed to output unchanged. |
+
+#### Optional Arguments
+| Argument | Description |
+|---|---|
+| __-h, --help__ | show this help message and exit |
+| __-m FASTA, --min_frag_len FASTA__ | Minimum fragment length when breaking a contig, in bp. Default=1000 |
+
+#### Output
+Output in FASTA format are written to stdout.
+
 
 ## Citing GPatch Helper Scripts
 Please use the following citation if you use this software in your work:
