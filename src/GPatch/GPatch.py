@@ -18,10 +18,11 @@ cigar string to infer the contig break-points in the reference
 genome.
 """
 
-def create_primary_alignments_list(query_bam, min_qual_score):
+def create_primary_alignments_list(query_bam, min_qual_score, dropped=None):
     """
     Extract all primary alignments from the BAM file and return
-    as a list.
+    as a list. If a dict is given as dropped, contigs excluded here
+    are recorded in it as name -> (reason, detail).
     """
     #i = 0
     #j = 0
@@ -33,10 +34,14 @@ def create_primary_alignments_list(query_bam, min_qual_score):
         if aln.is_unmapped:
             # Skip unmapped contigs
             #j += 1
+            if dropped is not None:
+                dropped[aln.query_name] = ("unmapped", "")
             continue
         if aln.mapping_quality < min_qual_score:
             # Skip low-quality mappings
             #k += 1
+            if dropped is not None and not (aln.is_supplementary or aln.is_secondary):
+                dropped[aln.query_name] = ("low_mapq", "MAPQ %d < %d" % (aln.mapping_quality, min_qual_score))
             continue
         if not (aln.is_supplementary or aln.is_secondary):
             #l += 1
@@ -131,12 +136,13 @@ def contigs_to_sorted_interval_list(contigs, contig_breakpoints):
     return ret
 
 
-def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
+def cluster_contig_positions(sorted_contig_intervals, drop_nested=False, nested=None):
     """
     Given a list of contig intervals, sorted on start then end
     position, cluster intervals based on linear overlap and
     return a list of clusters, optionally leaving out any nested
-    intervals.
+    intervals. If a dict is given as nested, dropped nested contigs
+    are recorded in it as name -> name of the containing contig.
     """
     clusters = []
     for contig in sorted_contig_intervals:
@@ -151,7 +157,8 @@ def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
                     else:
                         #sys.stderr.write("\tnested\n")
                         #sys.stderr.write("\t%s\n\t%s\n" % (cluster[-1], contig))
-                        pass
+                        if nested is not None:
+                            nested[contig[2]] = cluster[-1][2]
                 else:
                     cluster.append(contig)
                 #sys.stderr.write("\tmerged\n")
@@ -465,12 +472,24 @@ def main():
     
     # Load up the BAM into a dict, keyed on contig name.
     sys.stderr.write("Loading alignments...\n")
-    primary_alignments = create_primary_alignments_list(query_bam, args.min_qual_score)
+    unplaced = {}   # contig name -> (reason, detail) for contigs left out of the pseudoassembly
+    primary_alignments = create_primary_alignments_list(query_bam, args.min_qual_score, dropped=unplaced)
 
-    # Determine insertion break-points for each contig based
-    # on the cigar string for the primary alignment.
+    # Determine insertion break-points for each contig: in legacy mode from
+    # the soft-clips of the primary alignment; otherwise from the primary
+    # alignment chained with colinear supplementary alignments, extrapolated
+    # only by the remaining unaligned sequence. These extents are used for
+    # the nested-contig check and for junction handling.
     sys.stderr.write("Locating contig breakpoints...\n")
-    contig_breakpoints = contig_breakpoints_from_cigar(primary_alignments)
+    extents = None
+    if args.legacy_junctions:
+        contig_breakpoints = contig_breakpoints_from_cigar(primary_alignments)
+    else:
+        extents = compute_extents(args, primary_alignments)
+        contig_breakpoints = {}
+        for aln in primary_alignments:
+            e = extents[aln.query_name]
+            contig_breakpoints[aln.query_name] = [aln.reference_name, e["start"], e["end"], aln.query_name]
 
     # Sort the useful primary alignments by position via pysam sort.
     sys.stderr.write("Sorting primary alignments...\n")
@@ -481,6 +500,11 @@ def main():
     if args.whitelist is not None:
         sys.stderr.write("Filtering against the whitelist...\n")
         filtered_bam = whitelist_filter(sorted_primary_alignments_bam, args.whitelist)
+        with pysam.AlignmentFile(filtered_bam) as fb:
+            kept = set(aln.query_name for aln in fb)
+        for aln in primary_alignments:
+            if aln.query_name not in kept:
+                unplaced[aln.query_name] = ("whitelist", "alignment entirely outside whitelist regions")
         # Swap the filtered bam in for the sorted primary alignments bam
         os.remove(sorted_primary_alignments_bam)
         os.remove(sorted_primary_alignments_bam + ".bai")
@@ -505,7 +529,10 @@ def main():
         drop_nested = True
         if args.keep_nested:
             drop_nested = False
-        clusters = cluster_contig_positions(sorted_contig_intervals, drop_nested=drop_nested)
+        nested = {}
+        clusters = cluster_contig_positions(sorted_contig_intervals, drop_nested=drop_nested, nested=nested)
+        for name, container in nested.items():
+            unplaced[name] = ("nested", "extent within that of %s" % container)
 
         # Next thing to do is to push all retained contigs across clusters into
         # a final list of useful contigs. Since pysam.fetch does not allow
@@ -556,7 +583,7 @@ def main():
         junctions_tsv.write("chrom\tprev_contig\tcontig\tpos\tcontig_ext_start\tprev_resid3\tcontig_resid5"
                             "\tprev_chain_n\tcontig_chain_n\test_dist\twindow_bp\toverlap_candidates"
                             "\tdecision\ttrim_bp\tpatch_ref_start\tpatch_ref_end\tpatch_bp\treason\n")
-        extents, overlaps = prepare_junctions(args, sorted_primary_alignments)
+        overlaps = prepare_junctions(args, sorted_primary_alignments, extents)
 
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
         # Select all contigs mapped to this sequence.
@@ -573,7 +600,8 @@ def main():
             continue
 
         if args.legacy_junctions:
-            patched_seq = legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_bed, contigs_bed)
+            patched_seq = legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_bed, contigs_bed,
+                                                unplaced=unplaced)
         else:
             patched_seq = patch_sequence(ref_seq, contigs, extents, overlaps, args,
                                          patches_bed, contigs_bed, junctions_tsv)
@@ -591,6 +619,11 @@ def main():
     if junctions_tsv is not None:
         junctions_tsv.close()
 
+    # Report contigs left out of the pseudoassembly, with their sequences.
+    with open(cb_fname) as f:
+        placed = set(line.split("\t")[3] for line in f)
+    write_unplaced(args, placed, unplaced)
+
     # Clean up any leftover files as needed.
     if args.store_final_bam is None:
         os.remove(sorted_primary_alignments_bam)
@@ -599,28 +632,68 @@ def main():
     sys.stderr.write("Done!\n")
 
 
-def prepare_junctions(args, sorted_primary_alignments):
+def compute_extents(args, primary_alignments):
     """
-    Compute chained contig extents and measure overlaps at every junction
-    between adjacent placed contigs. Returns (extents, overlaps), keyed on
-    contig name and on (prev_name, name), respectively.
+    Chained reference extents (see chained_extent) for each primary
+    alignment, keyed on contig name.
     """
-    sys.stderr.write("Computing contig extents and measuring junction overlaps...\n")
-    order = {}
     spans = {}
+    for aln in primary_alignments:
+        if aln.query_sequence is None or len(aln.query_sequence) != aln.infer_read_length():
+            sys.stderr.write("ERROR: the primary alignment of %s does not contain the full contig sequence (hard-clipped?). Re-run the alignment with soft-clipping for primary alignments, or use --legacy_junctions.\n" % aln.query_name)
+            sys.exit(1)
+        spans[aln.query_name] = AlignedSpan(aln)
+    supps = collect_supplementary_spans(args.query_bam, set(spans), args.chain_mapq, args.chain_minlen)
+    return dict((name, chained_extent(span, supps.get(name, []), args.chain_maxgap, args.chain_tol))
+                for name, span in spans.items())
+
+
+def write_unplaced(args, placed, unplaced):
+    """
+    Write contigs present in the input BAM but absent from the
+    pseudoassembly to unplaced.fasta (original contig orientation) and
+    unplaced.tsv (reason and primary alignment).
+    """
+    uf_fname, ut_fname = "unplaced.fasta", "unplaced.tsv"
+    if args.prefix != "":
+        uf_fname = args.prefix + '.' + uf_fname
+        ut_fname = args.prefix + '.' + ut_fname
+    n = bp = 0
+    with pysam.AlignmentFile(args.query_bam) as bam, open(uf_fname, "w") as uf, open(ut_fname, "w") as ut:
+        ut.write("contig\tlength\treason\tdetail\tmapq\tref\tref_start\tref_end\tstrand\n")
+        for aln in bam:
+            if aln.is_secondary or aln.is_supplementary or aln.query_name in placed:
+                continue
+            seq = aln.query_sequence or ""
+            if aln.is_reverse:
+                seq = str(Seq(seq).reverse_complement())
+            reason, detail = unplaced.get(aln.query_name, ("not_placed", "reference sequence not in FASTA or contig skipped"))
+            if aln.is_unmapped:
+                ut.write("%s\t%d\t%s\t%s\t.\t.\t.\t.\t.\n" % (aln.query_name, len(seq), reason, detail))
+            else:
+                ut.write("%s\t%d\t%s\t%s\t%d\t%s\t%d\t%d\t%s\n" % (aln.query_name, len(seq), reason, detail,
+                         aln.mapping_quality, aln.reference_name, aln.reference_start, aln.reference_end,
+                         "-" if aln.is_reverse else "+"))
+            uf.write(">%s\n" % aln.query_name)
+            for i in range(0, len(seq), 80):
+                uf.write(seq[i:i + 80] + "\n")
+            n += 1
+            bp += len(seq)
+    sys.stderr.write("%d contigs (%d bp) were not placed; see %s and %s.\n" % (n, bp, ut_fname, uf_fname))
+
+
+def prepare_junctions(args, sorted_primary_alignments, extents):
+    """
+    Measure overlaps at every junction between adjacent placed contigs,
+    using the chained extents to size the search windows. Returns the
+    overlaps keyed on (prev_name, name).
+    """
+    sys.stderr.write("Measuring junction overlaps...\n")
+    order = {}
     for chrom in sorted_primary_alignments.references:
         contigs = list(sorted_primary_alignments.fetch(chrom))
         if contigs:
             order[chrom] = contigs
-        for contig in contigs:
-            if contig.query_sequence is None or len(contig.query_sequence) != contig.infer_read_length():
-                sys.stderr.write("ERROR: the primary alignment of %s does not contain the full contig sequence (hard-clipped?). Re-run the alignment with soft-clipping for primary alignments, or use --legacy_junctions.\n" % contig.query_name)
-                sys.exit(1)
-            spans[contig.query_name] = AlignedSpan(contig)
-    supps = collect_supplementary_spans(args.query_bam, set(spans), args.chain_mapq, args.chain_minlen)
-    extents = {}
-    for name, span in spans.items():
-        extents[name] = chained_extent(span, supps.get(name, []), args.chain_maxgap, args.chain_tol)
 
     minimap2 = args.minimap2 if args.minimap2 is not None else shutil.which("minimap2")
     if args.indel_tol > 0 and not minimap2:
@@ -641,7 +714,7 @@ def prepare_junctions(args, sorted_primary_alignments):
             results = list(ex.map(_measure_overlaps_job, jobs))
     else:
         results = [_measure_overlaps_job(j) for j in jobs]
-    return extents, dict(zip(keys, results))
+    return dict(zip(keys, results))
 
 
 def patch_sequence(ref_seq, contigs, extents, overlaps, args, patches_bed, contigs_bed, junctions_tsv):
@@ -729,7 +802,7 @@ def patch_sequence(ref_seq, contigs, extents, overlaps, args, patches_bed, conti
     return Seq("".join(pieces))
 
 
-def legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_bed, contigs_bed):
+def legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_bed, contigs_bed, unplaced=None):
     """
     Original (GPatch <= 0.4) junction handling (--legacy_junctions): contig extents from the
     primary alignment extended by its soft-clips; overlapping contigs trimmed
@@ -785,6 +858,8 @@ def legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_be
                     # building. However, I have seen instances of nested mappings
                     # that somehow slip through the cracks. This is a hack to fix
                     # those instances until I can figure out why it happens.
+                    if unplaced is not None:
+                        unplaced[contig.query_name] = ("nested", "trim would exceed contig length")
                     continue
             
         # Append the contig sequence to the patched sequence string

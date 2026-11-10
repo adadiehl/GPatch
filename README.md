@@ -83,7 +83,7 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 
 At each junction between adjacent placed contigs, GPatch either trims the 5' end of the second contig (the contigs overlap), patches the gap between them with reference sequence, or bookends them. N characters are never introduced, except that patches are replaced by N runs in --scaffold_only mode.
 
-1. __Contig extents.__ The primary alignment of each contig is chained to supplementary alignments of the same contig that are on the same chromosome and strand and colinear with it in both query and reference. Each contig end is then extrapolated onto the reference only by the unaligned sequence remaining beyond the outermost chained alignment (the "residual").
+1. __Contig extents.__ The primary alignment of each contig is chained to supplementary alignments of the same contig that are on the same chromosome and strand and colinear with it in both query and reference. Each contig end is then extrapolated onto the reference only by the unaligned sequence remaining beyond the outermost chained alignment (the "residual"). These extents are also used to identify nested contigs. With --legacy_junctions, the primary alignment's full soft-clips are used instead.
 2. __Overlap measurement.__ Overlaps are measured directly from the contig sequences. Candidate overlaps come from exact matches of two anchors: the next contig's first bases within the end of the previous contig, and the previous contig's last bases within the start of the next contig. A candidate supported by both anchors is accepted if identity over the whole overlap is at least --min_overlap_identity.
 3. __Decision.__ The extent-based gap estimate is *trusted* when the residuals at both contig ends of the junction are at most --max_resid, *one-sided* when only one exceeds it, and *untrusted* otherwise.
 
@@ -105,6 +105,8 @@ GPatch produces the following output files:
 | __patched.fasta__ | The final patched genome. |
 | __contigs.bed__ | Location of contigs in the coordinate frame of the patched genome. |
 | __patches.bed__ | Location of patches in the coordinate frame of the reference genome. |
+| __unplaced.tsv__ | Contigs in the input BAM that are not in the pseudoassembly, with the reason (unmapped, low_mapq, whitelist, nested) and their primary alignment. |
+| __unplaced.fasta__ | Sequences of the unplaced contigs, in their original orientation. |
 | __junctions.tsv__ | The decision (trim, patch or bookend) made at each junction between adjacent contigs and at chromosome ends, with the contig extents, residual unaligned lengths, gap estimate, candidate overlaps and the reason for the decision. Not written with --legacy_junctions. |
 
 ## Helper Scripts
