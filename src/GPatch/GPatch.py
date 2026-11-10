@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import sys, os, re
+import bisect, shutil, subprocess, tempfile
+from concurrent.futures import ProcessPoolExecutor
 from argparse import ArgumentParser, SUPPRESS
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -160,6 +162,236 @@ def cluster_contig_positions(sorted_contig_intervals, drop_nested=False):
     return clusters
 
 
+"""
+Junction handling.
+
+For each pair of adjacent placed contigs, GPatch decides whether to trim the
+5' end of the second contig (the contigs overlap), patch the gap between them
+with reference sequence, or bookend them. N characters are never introduced
+(except in --scaffold_only mode, where patches are replaced by N runs).
+
+1) Contig extents on the reference. The primary alignment is chained to
+   supplementary alignments of the same contig on the same chromosome and
+   strand that are colinear with it in both query and reference. Each contig
+   end is extrapolated 1:1 only by the residual unaligned query sequence
+   beyond the outermost chained alignment.
+
+2) Direct overlap measurement. Candidate overlaps between the end of the
+   previous contig and the start of the next (both as placed) come from exact
+   matches of two anchors: the next contig's first bases in the previous
+   contig's tail, and the previous contig's last bases in the next contig's
+   head. Candidates supported by both anchors at the same offset (or within
+   --indel_tol, verified with minimap2) are accepted when identity over the
+   whole overlap is >= --min_overlap_identity. A general-purpose aligner is
+   not used to search for overlaps because, in palindromes and tandem arrays,
+   a short true overlap is reported as a low-scoring secondary of a longer
+   paralogous alignment and filtered out.
+
+The extent-based gap estimate is "trusted" when the residual unaligned
+sequence at both contig ends of a junction is <= --max_resid, "one-sided" when
+only one end exceeds it, and "untrusted" otherwise. Decisions:
+  trim_measured    one overlap found -> trim it
+  trim_ambiguous   several overlap offsets (tandem repeats) -> the one closest
+                   to the estimated overlap if the estimate is trusted or
+                   one-sided, otherwise the smallest
+  patch            no overlap; estimate >= 0 and trusted -> reference patch
+  patch_one_sided  no overlap; estimate >= 0 and one-sided -> reference patch
+  bookend          no overlap; estimate negative or untrusted
+Chromosome ends are patched when the residual at that contig end is
+<= --max_resid; contigs are never trimmed against a chromosome end.
+"""
+
+
+class AlignedSpan(object):
+    """Reference and query (placement-orientation) coordinates of one alignment."""
+    __slots__ = ("chrom", "rs", "re", "qs", "qe", "qlen", "is_reverse", "mapq")
+
+    def __init__(self, aln):
+        lead = 0
+        for op, n in aln.cigartuples:
+            if op in (4, 5):   # soft or hard clip
+                lead += n
+            else:
+                break
+        self.chrom = aln.reference_name
+        self.rs = aln.reference_start
+        self.re = aln.reference_end
+        self.qlen = aln.infer_read_length()
+        self.qs = lead
+        self.qe = lead + aln.query_alignment_length
+        self.is_reverse = aln.is_reverse
+        self.mapq = aln.mapping_quality
+
+
+def collect_supplementary_spans(bam_path, names, min_mapq, min_len):
+    """Supplementary alignments usable for chaining, keyed on contig name."""
+    supps = {}
+    with pysam.AlignmentFile(bam_path) as bam:
+        for aln in bam:
+            if not aln.is_supplementary or aln.is_unmapped or aln.query_name not in names:
+                continue
+            if aln.mapping_quality < min_mapq or aln.query_alignment_length < min_len:
+                continue
+            supps.setdefault(aln.query_name, []).append(AlignedSpan(aln))
+    return supps
+
+
+def chained_extent(primary, supps, maxgap, tol):
+    """
+    Chain colinear supplementary alignments onto the primary alignment and
+    return the extrapolated reference extent of the contig together with the
+    residual unaligned query length at each end.
+    """
+    cands = [s for s in supps if s.chrom == primary.chrom and s.is_reverse == primary.is_reverse]
+    left = right = primary
+    n = 1
+    while True:
+        best = None
+        for s in cands:
+            dq, dr = left.qs - s.qe, left.rs - s.re
+            if s.qs < left.qs and s.rs < left.rs and -tol <= dq <= maxgap and -tol <= dr <= maxgap:
+                if best is None or s.qs < best.qs:
+                    best = s
+        if best is None:
+            break
+        left, n = best, n + 1
+    while True:
+        best = None
+        for s in cands:
+            dq, dr = s.qs - right.qe, s.rs - right.re
+            if s.qe > right.qe and s.re > right.re and -tol <= dq <= maxgap and -tol <= dr <= maxgap:
+                if best is None or s.qe > best.qe:
+                    best = s
+        if best is None:
+            break
+        right, n = best, n + 1
+    return {"start": left.rs - left.qs, "end": right.re + (primary.qlen - right.qe),
+            "resid5": left.qs, "resid3": primary.qlen - right.qe, "nchain": n}
+
+
+def find_all(hay, needle):
+    """All start positions of needle in hay."""
+    out, i = [], hay.find(needle)
+    while i != -1:
+        out.append(i)
+        i = hay.find(needle, i + 1)
+    return out
+
+
+def identity_at_least(x, y, min_id, chunk=1024):
+    """True if equal-length strings x and y are >= min_id identical."""
+    max_mm = int((1.0 - min_id) * len(x))
+    mm = 0
+    for i in range(0, len(x), chunk):
+        a, b = x[i:i + chunk], y[i:i + chunk]
+        if a != b:
+            mm += sum(1 for c, d in zip(a, b) if c != d)
+            if mm > max_mm:
+                return False
+    return True
+
+
+def identity_minimap2(x, y, minimap2):
+    """
+    Identity of a near-equal-length sequence pair (an overlap containing
+    indels) via minimap2; the alignment must cover >= 99% of both.
+    """
+    tmp = tempfile.mkdtemp(prefix="gpatch_")
+    try:
+        q, t = os.path.join(tmp, "q.fa"), os.path.join(tmp, "t.fa")
+        with open(q, "w") as o:
+            o.write(">q\n%s\n" % x)
+        with open(t, "w") as o:
+            o.write(">t\n%s\n" % y)
+        out = subprocess.run([minimap2, "-x", "asm5", "-c", "-t", "1", t, q],
+                             capture_output=True, text=True, check=True).stdout
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    best = 0.0
+    for line in out.splitlines():
+        f = line.split("\t")
+        qlen, qs, qe, strand = int(f[1]), int(f[2]), int(f[3]), f[4]
+        tlen, ts, te, nmatch, blen = int(f[6]), int(f[7]), int(f[8]), int(f[9]), int(f[10])
+        if strand == "+" and qe - qs >= 0.99 * qlen and te - ts >= 0.99 * tlen:
+            best = max(best, nmatch / blen)
+    return best
+
+
+def measure_overlaps(tail, head, prev_len, cur_len, L, p):
+    """
+    Anchored suffix/prefix overlap detection between the end of the previous
+    contig (tail: its last <= win_max bases, as placed) and the start of the
+    next contig (head: its first <= win_max bases). Returns
+    (sorted candidate trims, final window size, note).
+    """
+    k = p["anchor"]
+    note = ""
+    while True:
+        lp, lc = min(L, prev_len), min(L, cur_len)
+        ps, cs = tail[len(tail) - lp:], head[:lc]
+        ov1 = sorted(set(lp - i for i in find_all(ps, cs[:k])))
+        ov2 = sorted(set(j + k for j in find_all(cs, ps[-k:])))
+        s2 = set(ov2)
+        trims, n_tested = [], 0
+        for o in ov1:
+            if o in s2:
+                n_tested += 1
+                if identity_at_least(ps[lp - o:], cs[:o], p["min_id"]):
+                    trims.append(o)
+        if not trims and p["indel_tol"] > 0 and p["minimap2"]:
+            near = []
+            for o1 in ov1:
+                lo = bisect.bisect_left(ov2, o1 - p["indel_tol"])
+                hi = bisect.bisect_right(ov2, o1 + p["indel_tol"])
+                near.extend((abs(o1 - o2), o1, o2) for o2 in ov2[lo:hi] if o2 != o1)
+            for _, o1, o2 in sorted(near)[:p["max_mm2_tests"]]:
+                n_tested += 1
+                if identity_minimap2(ps[lp - o1:], cs[:o2], p["minimap2"]) >= p["min_id"]:
+                    trims.append(o2)   # trim = position in the next contig of the previous contig's end
+        # The overlap may extend beyond the window if an anchor lies at the
+        # far edge of it.
+        if not trims and L < p["win_max"] and ((ov1 and ov1[-1] > lp - k and lp < prev_len) or
+                                               (ov2 and ov2[-1] > lc - k and lc < cur_len)):
+            L = min(2 * L, p["win_max"])
+            note = "window doubled"
+            continue
+        trims = [t for t in sorted(set(trims)) if t < cur_len]
+        note = ("%s; " % note if note else "") + "anchors %d/%d, tested %d" % (len(ov1), len(ov2), n_tested)
+        return trims, L, note
+
+
+def _measure_overlaps_job(job):
+    return measure_overlaps(*job)
+
+
+def decide_junction(prev_ext, cur_ext, pos, trims, max_resid):
+    """
+    Decide how to join two adjacent contigs. pos is the reference position of
+    the end of the placed sequence so far. Returns (decision, trim, reason).
+    """
+    est = cur_ext["start"] - pos   # > 0 gap, < 0 overlap
+    big = []
+    if prev_ext["resid3"] > max_resid:
+        big.append("prev residual 3' unaligned %d" % prev_ext["resid3"])
+    if cur_ext["resid5"] > max_resid:
+        big.append("residual 5' unaligned %d" % cur_ext["resid5"])
+    trust = ("trusted", "one-sided", "untrusted")[len(big)]
+    if len(trims) == 1:
+        return "trim_measured", trims[0], "single overlap"
+    if len(trims) > 1 and trust != "untrusted":
+        t = min(trims, key=lambda x: (abs(x + est), x))
+        return "trim_ambiguous", t, ("%d overlap offsets; closest to %s estimated overlap %d used"
+                                     % (len(trims), trust, -est))
+    if len(trims) > 1:
+        return "trim_ambiguous", trims[0], "%d overlap offsets; estimate untrusted, smallest used" % len(trims)
+    if est >= 0 and trust == "trusted":
+        return "patch", 0, "no overlap; gap estimate trusted"
+    if est >= 0 and trust == "one-sided":
+        return "patch_one_sided", 0, "no overlap; one-sided gap estimate used (%s)" % big[0]
+    rs = (["estimate predicts overlap of %d but none found" % -est] if est < 0 else []) + big
+    return "bookend", 0, "no overlap; unusable gap estimate: " + ", ".join(rs)
+
+
 def main():
     parser = ArgumentParser(description="Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. By default, reference chromosomes with no mapped contigs are printed to output unchanged. Use the --drop_missing option to disable this behavior. By default, patches are applied to the 5' and 3' telomere ends of pseudochromsomes if the first and last contig alignments do not extend to the start/end of the reference chromsome. In some cases, this may cause spurious duplications. Use the --no_extend option if this is a concern. Note that GPatch is designed to be run on single-haplotype or unphased genome assemblies. For phased assemblies, each haplotype should be separated into its own input FASTA file prior to alignment. GPatch can then be run separately on the BAM files for each haplotype to obtain phased pseudoassemblies, otherwise results will be unpredictable and likely incorrect.")
     parser.add_argument('-q', '--query_bam', metavar='SAM/BAM', type=str,
@@ -181,13 +413,9 @@ def main():
     parser.add_argument('-d', '--drop_missing',
                         required=False, default=False, action="store_true",
                         help='Omit unpatched reference chromosome records from the output if no contigs map to them. Default: Unpatched chromosomes are printed to output unchanged.')
-    # Note the --no_trim option is deprecated in versions 0.4.0. Trimming
-    # is disabled as it had universally negative effects in our testing
-    # and should not be used.
     parser.add_argument('-t', '--no_trim',
-                        required=False, default=True, action="store_true",
-                        #help='Do not trim the 5-prime end of contigs whose mappings overlap the previously-placed contig. Default: Overlapping contig sequence will be trimmed at the previous 3-prime contig breakpoint.')
-                        help=SUPPRESS)
+                        required=False, default=False, action="store_true",
+                        help='Do not trim the 5-prime end of contigs that overlap the previously-placed contig; overlapping contigs are bookended untrimmed. Default: Trim the overlap, measured directly from the contig sequences (or, with --legacy_junctions, inferred from the soft-clip-extended alignment coordinates).')
     parser.add_argument('-s', '--scaffold_only',
                         required=False, default=False, action="store_true",
                         help='Pad gaps between placed contigs with strings of N characters instead of patching with sequence from the reference assembly. Effectively turns GPatch into a reference-guided scaffolding tool. Note that patches.bed will still be generated to document (inverse) mapped contig boundaries in reference frame.')
@@ -200,7 +428,37 @@ def main():
     parser.add_argument('-k', '--keep_nested',
                         required=False, default=False, action="store_true",
                         help='Do not drop contigs with mapped positions nested entirely inside other mapped contigs. Instead, these will be bookended after the contig in which they are nested. Default is to drop contigs with mapped positions nested entirely within other mapped contigs. This option should be used with caution as these mappings cannot be placed unambigiously relative to other mapped contigs, thus including them is likely to lead to unpredictable and possibly incorrect results. Do not use this unless you are sure you know what you are doing!')
-    
+    junc = parser.add_argument_group("junction handling", "Options controlling how adjacent placed contigs are joined (trim, patch or bookend). See junctions.tsv for the decision made at each junction.")
+    junc.add_argument('--legacy_junctions',
+                      required=False, default=False, action="store_true",
+                      help='Use the original (GPatch <= 0.4) junction logic: contig extents from the primary alignment extended by its full soft-clips, overlaps trimmed by the overlap of those extents, and gaps patched by their distance. No junctions.tsv is written. Default: chained extents and directly measured overlaps.')
+    junc.add_argument('--max_resid', metavar='N', type=int, default=10000,
+                      help='Maximum unaligned sequence (bp) remaining at a contig end, after chaining, for the reference gap estimate at that end to be trusted. Default=10000')
+    junc.add_argument('--chain_mapq', metavar='N', type=int, default=20,
+                      help='Minimum mapping quality of supplementary alignments used to extend contig extents. Default=20')
+    junc.add_argument('--chain_minlen', metavar='N', type=int, default=10000,
+                      help='Minimum aligned query length (bp) of supplementary alignments used to extend contig extents. Default=10000')
+    junc.add_argument('--chain_maxgap', metavar='N', type=int, default=1000000,
+                      help='Maximum gap (bp), in both query and reference, between chained alignments. Default=1000000')
+    junc.add_argument('--chain_tol', metavar='N', type=int, default=10000,
+                      help='Maximum overlap (bp) allowed between chained alignments. Default=10000')
+    junc.add_argument('--anchor', metavar='N', type=int, default=500,
+                      help='Length (bp) of the exact anchors used to detect overlaps between adjacent contigs; also the minimum detectable overlap. Default=500')
+    junc.add_argument('--min_overlap_identity', metavar='F', type=float, default=0.999,
+                      help='Minimum identity over the whole overlap for a candidate overlap to be accepted. Default=0.999')
+    junc.add_argument('--indel_tol', metavar='N', type=int, default=50,
+                      help='Maximum length difference (bp) between the two anchor-implied overlap lengths for a candidate containing indels; such candidates are verified with minimap2. 0 disables. Default=50')
+    junc.add_argument('--max_mm2_tests', metavar='N', type=int, default=20,
+                      help='Maximum number of indel-containing candidate overlaps verified with minimap2 per junction. Default=20')
+    junc.add_argument('--win_min', metavar='N', type=int, default=1000000,
+                      help='Minimum size (bp) of the contig-end windows searched for overlaps. Default=1000000')
+    junc.add_argument('--win_max', metavar='N', type=int, default=4000000,
+                      help='Maximum size (bp) of the contig-end windows searched for overlaps. Default=4000000')
+    junc.add_argument('--minimap2', metavar='PATH', type=str, default=None,
+                      help='Path to minimap2, used only to verify candidate overlaps containing indels. Default: minimap2 on PATH; if not found, such candidates are not considered.')
+    junc.add_argument('--threads', metavar='N', type=int, default=1,
+                      help='Number of processes used for overlap detection. Default=1')
+
     args = parser.parse_args()
 
     query_bam = pysam.AlignmentFile(args.query_bam)
@@ -287,7 +545,19 @@ def main():
 
     # Open up the sorted primary alignments bam for reading.
     sorted_primary_alignments = pysam.AlignmentFile(sorted_primary_alignments_bam, "rb")
-    
+
+    junctions_tsv = None
+    if not args.legacy_junctions:
+        jt_fname = "junctions.tsv"
+        if args.prefix != "":
+            jt_fname = args.prefix + '.' + jt_fname
+        junctions_tsv = open(jt_fname, "w")  # Per-junction decisions
+        junctions_tsv.write("# GPatch %s %s\n" % (__version__, " ".join(sys.argv[1:])))
+        junctions_tsv.write("chrom\tprev_contig\tcontig\tpos\tcontig_ext_start\tprev_resid3\tcontig_resid5"
+                            "\tprev_chain_n\tcontig_chain_n\test_dist\twindow_bp\toverlap_candidates"
+                            "\tdecision\ttrim_bp\tpatch_ref_start\tpatch_ref_end\tpatch_bp\treason\n")
+        extents, overlaps = prepare_junctions(args, sorted_primary_alignments)
+
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
         # Select all contigs mapped to this sequence.
         contigs = list(sorted_primary_alignments.fetch(ref_seq.id))
@@ -301,89 +571,14 @@ def main():
                 sys.stderr.write("No contigs map to %s. Printing the reference sequence to output unchanged.\n" % (ref_seq.id))
                 patched_fasta.write("%s\n" % (ref_seq.format("fasta")))
             continue
-        
-        pos = 0 # Tracks position on the reference chromosome        
-        patched_seq = ""
-        for contig in contigs:
-            rstart = contig_breakpoints[contig.query_name][1]
-            """
-            # This introduced a one-off error! We don't need to do this
-            # because all coordinates are already in proper zero-based form.
-            if rstart > 0:
-                rstart -= 1
-            """
 
-            # Check for overlapping/bookended contig mappings.
-            qstart = 0  # Start of contig interval to append
-            #sys.stderr.write("%s\t%s\t%s\n" % (rstart, pos, pos-rstart))
-            if rstart > pos:
-                # No overlap. Append the patch, in all lower-case
-                # for easy identification.
-                patch = ""
-                if args.scaffold_only:
-                    # Use a string of N characters the length of the patch instead
-                    # of an actual patch.
-                    if args.gap_length >= 0:
-                        patch = "n" * args.gap_length
-                    else:
-                        patch = "n" * (rstart-pos)
-                else:
-                    patch = ref_seq.seq[pos:rstart].lower()
-                if pos == 0 and args.no_extend:
-                    pass
-                else:
-                    patched_seq = patched_seq + patch
-                    # Write patch coordinates in reference frame to patches_bed
-                    patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
-            else:
-                # Handle overlapping contig ends by trimming the 5' end of
-                # this contig sequence by the length of the overlap. Note this
-                # evaluates to zero if contigs are bookended (i.e., pos and
-                # rstart are equal.)
-                #
-                # NOTE THAT THIS BEHAVIOR IS DEPRECATED AND THE OPTION TO TRIM
-                # IS DISABLED IN VERSIONS 0.4.0 AND GREATER.
-                if not args.no_trim:
-                    qstart = pos - rstart
-                    if qstart > len(Seq(contig.query_sequence)):
-                        # This should not happen, as it is indicative of a nested
-                        # mapping, which should be filtered out prior to sequence-
-                        # building. However, I have seen instances of nested mappings
-                        # that somehow slip through the cracks. This is a hack to fix
-                        # those instances until I can figure out why it happens.
-                        continue
-                
-            # Append the contig sequence to the patched sequence string
-            contig_start = len(patched_seq)
-            # All patch sequences are printed in upper case.
-            # Overlaps with the previous contig are handled by truncating
-            # the 3' end of this contig sequence.
-            patched_seq = patched_seq + Seq(contig.query_sequence)[qstart:len(Seq(contig.query_sequence))].upper()
+        if args.legacy_junctions:
+            patched_seq = legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_bed, contigs_bed)
+        else:
+            patched_seq = patch_sequence(ref_seq, contigs, extents, overlaps, args,
+                                         patches_bed, contigs_bed, junctions_tsv)
 
-            # Gather what we need to write BED coordinates for this contig
-            qstrand = "+"
-            if contig.is_reverse:
-                # Since BAM sequence is already reverse-complemented, we don't have to!
-                qstrand = "-"
-                
-            # Write contig coordinates in patched-genome frame to contigs_bed
-            contigs_bed.write("%s\t%d\t%d\t%s\t.\t%s\t%d\t%d\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand, qstart, len(Seq(contig.query_sequence))))
-
-            # Update the current position in the reference sequence if the
-            # end position of the current contig is 3' of the current pos.
-            #sys.stderr.write("%s\t%s\t%s\n" % (pos, contig_breakpoints[contig.query_name][2], len(ref_seq.seq)))
-            if contig_breakpoints[contig.query_name][2] > pos:
-                # This should always evaluate true in the absence of nested contigs.
-                pos = contig_breakpoints[contig.query_name][2]
-                
-        # Once the above loop finishes, we need to add the terminal segment
-        # from the reference genome.
-        if pos < len(ref_seq.seq) and not args.no_extend:
-            #sys.stderr.write("%s\n" % (ref_seq.seq[pos:len(ref_seq.seq)]))
-            patched_seq = patched_seq + ref_seq.seq[pos:len(ref_seq.seq)]
-            patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, len(ref_seq.seq)))
-
-        # Swap in the patched sequence for the reference sequence and print the result 
+        # Swap in the patched sequence for the reference sequence and print the result
         ref_seq.seq = patched_seq
         patched_fasta.write("%s\n" % (ref_seq.format("fasta")))
 
@@ -393,14 +588,238 @@ def main():
     patched_fasta.close()
     patches_bed.close()
     contigs_bed.close()
+    if junctions_tsv is not None:
+        junctions_tsv.close()
 
     # Clean up any leftover files as needed.
     if args.store_final_bam is None:
         os.remove(sorted_primary_alignments_bam)
         os.remove(sorted_primary_alignments_bam + '.bai')
-    
+
     sys.stderr.write("Done!\n")
-        
+
+
+def prepare_junctions(args, sorted_primary_alignments):
+    """
+    Compute chained contig extents and measure overlaps at every junction
+    between adjacent placed contigs. Returns (extents, overlaps), keyed on
+    contig name and on (prev_name, name), respectively.
+    """
+    sys.stderr.write("Computing contig extents and measuring junction overlaps...\n")
+    order = {}
+    spans = {}
+    for chrom in sorted_primary_alignments.references:
+        contigs = list(sorted_primary_alignments.fetch(chrom))
+        if contigs:
+            order[chrom] = contigs
+        for contig in contigs:
+            if contig.query_sequence is None or len(contig.query_sequence) != contig.infer_read_length():
+                sys.stderr.write("ERROR: the primary alignment of %s does not contain the full contig sequence (hard-clipped?). Re-run the alignment with soft-clipping for primary alignments, or use --legacy_junctions.\n" % contig.query_name)
+                sys.exit(1)
+            spans[contig.query_name] = AlignedSpan(contig)
+    supps = collect_supplementary_spans(args.query_bam, set(spans), args.chain_mapq, args.chain_minlen)
+    extents = {}
+    for name, span in spans.items():
+        extents[name] = chained_extent(span, supps.get(name, []), args.chain_maxgap, args.chain_tol)
+
+    minimap2 = args.minimap2 if args.minimap2 is not None else shutil.which("minimap2")
+    if args.indel_tol > 0 and not minimap2:
+        sys.stderr.write("WARNING: minimap2 not found; candidate overlaps containing indels will not be considered.\n")
+    params = {"anchor": args.anchor, "min_id": args.min_overlap_identity, "indel_tol": args.indel_tol,
+              "max_mm2_tests": args.max_mm2_tests, "win_max": args.win_max, "minimap2": minimap2}
+    keys, jobs = [], []
+    for chrom, contigs in order.items():
+        for prev, cur in zip(contigs, contigs[1:]):
+            P, C = extents[prev.query_name], extents[cur.query_name]
+            est_overlap = P["end"] - C["start"]
+            L0 = min(args.win_max, max(args.win_min, 2 * max(est_overlap, 0) + P["resid3"] + C["resid5"]))
+            pseq, cseq = prev.query_sequence.upper(), cur.query_sequence.upper()
+            keys.append((prev.query_name, cur.query_name))
+            jobs.append((pseq[-args.win_max:], cseq[:args.win_max], len(pseq), len(cseq), L0, params))
+    if args.threads > 1:
+        with ProcessPoolExecutor(args.threads) as ex:
+            results = list(ex.map(_measure_overlaps_job, jobs))
+    else:
+        results = [_measure_overlaps_job(j) for j in jobs]
+    return extents, dict(zip(keys, results))
+
+
+def patch_sequence(ref_seq, contigs, extents, overlaps, args, patches_bed, contigs_bed, junctions_tsv):
+    """
+    Build the patched sequence for one reference chromosome, deciding at each
+    junction whether to trim, patch or bookend (see the junction-handling
+    notes above). Returns the patched sequence as a Seq.
+    """
+    chrom = ref_seq.id
+    L = len(ref_seq.seq)
+    pieces = []
+    plen = 0
+    pos = None    # reference position of the end of the sequence placed so far
+    prev = None
+
+    def row(*v):
+        junctions_tsv.write("\t".join(str(x) for x in v) + "\n")
+
+    def patch_seq(a, b):
+        if args.scaffold_only:
+            return "n" * (args.gap_length if args.gap_length >= 0 else b - a)
+        return str(ref_seq.seq[a:b]).lower()
+
+    for contig in contigs:
+        name = contig.query_name
+        C = extents[name]
+        trim, patch = 0, None
+        if prev is None:
+            s = C["start"]
+            if args.no_extend:
+                dec, why = "bookend", "chromosome start; --no_extend"
+            elif s > 0 and C["resid5"] <= args.max_resid:
+                dec, why, patch = "patch", "chromosome start; extent trusted", (0, min(s, L))
+            elif s > 0:
+                dec, why = "bookend", "chromosome start; residual 5' unaligned %d > --max_resid" % C["resid5"]
+            else:
+                dec, why = "bookend", "chromosome start; extrapolated start %d <= 0 (no trim at chromosome ends)" % s
+            row(chrom, "START", name, 0, s, ".", C["resid5"], ".", C["nchain"], s, ".", ".",
+                dec, 0, *(patch if patch else (".", ".")), (patch[1] - patch[0]) if patch else 0, why)
+        else:
+            P = extents[prev]
+            trims, win, note = overlaps[(prev, name)]
+            est = C["start"] - pos
+            dec, trim, why = decide_junction(P, C, pos, trims, args.max_resid)
+            if dec.startswith("trim") and args.no_trim:
+                dec, why, trim = "bookend", "overlap of %d not trimmed (--no_trim); %s" % (trim, why), 0
+            if dec.startswith("patch"):
+                patch = (min(pos, L), min(C["start"], L))
+            row(chrom, prev, name, pos, C["start"], P["resid3"], C["resid5"], P["nchain"], C["nchain"],
+                est, win, ",".join(str(t) for t in trims) or ".", dec, trim,
+                *(patch if patch else (".", ".")), (patch[1] - patch[0]) if patch else 0,
+                why + "; " + note)
+        if patch and patch[1] > patch[0]:
+            # Patches are printed in lower case for easy identification.
+            ps = patch_seq(patch[0], patch[1])
+            pieces.append(ps)
+            plen += len(ps)
+            patches_bed.write("%s\t%d\t%d\n" % (chrom, patch[0], patch[1]))
+        # Contig sequence (already in placement orientation in the BAM), in upper case.
+        seq = contig.query_sequence
+        start = plen
+        pieces.append(seq[trim:].upper())
+        plen += len(seq) - trim
+        qstrand = "-" if contig.is_reverse else "+"
+        contigs_bed.write("%s\t%d\t%d\t%s\t.\t%s\t%d\t%d\n" % (chrom, start, plen, name, qstrand, trim, len(seq)))
+        pos = C["end"] if pos is None else max(pos, C["end"])
+        prev = name
+
+    # Terminal patch from the end of the last contig to the chromosome end.
+    P = extents[prev]
+    patch = None
+    if args.no_extend:
+        dec, why = "bookend", "chromosome end; --no_extend"
+    elif pos < L and P["resid3"] <= args.max_resid:
+        dec, why, patch = "patch", "chromosome end; extent trusted", (max(pos, 0), L)
+    elif pos < L:
+        dec, why = "bookend", "chromosome end; residual 3' unaligned %d > --max_resid" % P["resid3"]
+    else:
+        dec, why = "bookend", "chromosome end; extrapolated end %d >= chromosome length" % pos
+    row(chrom, prev, "END", pos, L, P["resid3"], ".", P["nchain"], ".", L - pos, ".", ".",
+        dec, 0, *(patch if patch else (".", ".")), (patch[1] - patch[0]) if patch else 0, why)
+    if patch and patch[1] > patch[0]:
+        pieces.append(patch_seq(patch[0], patch[1]))
+        patches_bed.write("%s\t%d\t%d\n" % (chrom, patch[0], patch[1]))
+    return Seq("".join(pieces))
+
+
+def legacy_patch_sequence(ref_seq, contigs, contig_breakpoints, args, patches_bed, contigs_bed):
+    """
+    Original (GPatch <= 0.4) junction handling (--legacy_junctions): contig extents from the
+    primary alignment extended by its soft-clips; overlapping contigs trimmed
+    by the overlap of those extents (unless --no_trim); gaps patched by their
+    distance. Returns the patched sequence.
+    """
+    pos = 0 # Tracks position on the reference chromosome
+    patched_seq = ""
+    for contig in contigs:
+        rstart = contig_breakpoints[contig.query_name][1]
+        """
+        # This introduced a one-off error! We don't need to do this
+        # because all coordinates are already in proper zero-based form.
+        if rstart > 0:
+            rstart -= 1
+        """
+
+        # Check for overlapping/bookended contig mappings.
+        qstart = 0  # Start of contig interval to append
+        #sys.stderr.write("%s\t%s\t%s\n" % (rstart, pos, pos-rstart))
+        if rstart > pos:
+            # No overlap. Append the patch, in all lower-case
+            # for easy identification.
+            patch = ""
+            if args.scaffold_only:
+                # Use a string of N characters the length of the patch instead
+                # of an actual patch.
+                if args.gap_length >= 0:
+                    patch = "n" * args.gap_length
+                else:
+                    patch = "n" * (rstart-pos)
+            else:
+                patch = ref_seq.seq[pos:rstart].lower()
+            if pos == 0 and args.no_extend:
+                pass
+            else:
+                patched_seq = patched_seq + patch
+                # Write patch coordinates in reference frame to patches_bed
+                patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, rstart))
+        else:
+            # Handle overlapping contig ends by trimming the 5' end of
+            # this contig sequence by the length of the overlap. Note this
+            # evaluates to zero if contigs are bookended (i.e., pos and
+            # rstart are equal.)
+            # Trimming by alignment-coordinate overlap is unreliable when
+            # contig ends are soft-clipped; the default (non-legacy) mode
+            # measures overlaps from the contig sequences instead.
+            if not args.no_trim:
+                qstart = pos - rstart
+                if qstart > len(Seq(contig.query_sequence)):
+                    # This should not happen, as it is indicative of a nested
+                    # mapping, which should be filtered out prior to sequence-
+                    # building. However, I have seen instances of nested mappings
+                    # that somehow slip through the cracks. This is a hack to fix
+                    # those instances until I can figure out why it happens.
+                    continue
+            
+        # Append the contig sequence to the patched sequence string
+        contig_start = len(patched_seq)
+        # All patch sequences are printed in upper case.
+        # Overlaps with the previous contig are handled by truncating
+        # the 3' end of this contig sequence.
+        patched_seq = patched_seq + Seq(contig.query_sequence)[qstart:len(Seq(contig.query_sequence))].upper()
+
+        # Gather what we need to write BED coordinates for this contig
+        qstrand = "+"
+        if contig.is_reverse:
+            # Since BAM sequence is already reverse-complemented, we don't have to!
+            qstrand = "-"
+            
+        # Write contig coordinates in patched-genome frame to contigs_bed
+        contigs_bed.write("%s\t%d\t%d\t%s\t.\t%s\t%d\t%d\n" % (ref_seq.id, contig_start, len(patched_seq), contig.query_name, qstrand, qstart, len(Seq(contig.query_sequence))))
+
+        # Update the current position in the reference sequence if the
+        # end position of the current contig is 3' of the current pos.
+        #sys.stderr.write("%s\t%s\t%s\n" % (pos, contig_breakpoints[contig.query_name][2], len(ref_seq.seq)))
+        if contig_breakpoints[contig.query_name][2] > pos:
+            # This should always evaluate true in the absence of nested contigs.
+            pos = contig_breakpoints[contig.query_name][2]
+            
+    # Once the above loop finishes, we need to add the terminal segment
+    # from the reference genome.
+    if pos < len(ref_seq.seq) and not args.no_extend:
+        #sys.stderr.write("%s\n" % (ref_seq.seq[pos:len(ref_seq.seq)]))
+        patched_seq = patched_seq + ref_seq.seq[pos:len(ref_seq.seq)]
+        patches_bed.write("%s\t%d\t%d\n" % (ref_seq.id, pos, len(ref_seq.seq)))
+
+    return patched_seq
+
+
 if __name__ == '__main__':
     main()
     exit(0)
