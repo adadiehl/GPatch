@@ -9,7 +9,7 @@ from Bio.Seq import Seq
 import pysam
 import random
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 """
 Given a name-sorted BAM file, cluster mapped reads by name and
