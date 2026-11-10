@@ -465,6 +465,18 @@ def main():
                       help='Path to minimap2, used only to verify candidate overlaps containing indels. Default: minimap2 on PATH; if not found, such candidates are not considered.')
     junc.add_argument('--threads', metavar='N', type=int, default=1,
                       help='Number of processes used for overlap detection. Default=1')
+    ext = parser.add_argument_group("overlap extension", "After alignment-based placement, unplaced contigs (low mapping quality or nested) are inserted into gaps by extending from the flanking placed contigs through unambiguous sequence overlaps. Not used with --legacy_junctions. See extension.tsv for every walk step and stop reason.")
+    ext.add_argument('--no_extension',
+                     required=False, default=False, action="store_true",
+                     help='Do not insert unplaced contigs by overlap extension.')
+    ext.add_argument('--ext_min_overlap', metavar='N', type=int, default=5000,
+                     help='Minimum overlap (bp) for an extension step, or for a walk to be considered to have reached the opposite flanking contig. Short overlaps in tandem and palindromic repeats are often spurious. Default=5000')
+    ext.add_argument('--ext_region_pad', metavar='N', type=int, default=1000000,
+                     help='A candidate contig\'s primary alignment must lie within the gap region extended by this many bp beyond the flanking contigs\' alignments. Default=1000000')
+    ext.add_argument('--ext_window', metavar='N', type=int, default=2000000,
+                     help='Size (bp) of the contig-end windows searched for extension overlaps. Default=2000000')
+    ext.add_argument('--ext_max_steps', metavar='N', type=int, default=50,
+                     help='Maximum number of contigs added by one walk. Default=50')
 
     args = parser.parse_args()
 
@@ -573,6 +585,30 @@ def main():
     # Open up the sorted primary alignments bam for reading.
     sorted_primary_alignments = pysam.AlignmentFile(sorted_primary_alignments_bam, "rb")
 
+    # Placement order on each reference sequence: by alignment position, plus
+    # (default mode) contigs inserted by overlap extension.
+    placement = {}
+    for chrom in sorted_primary_alignments.references:
+        contigs = list(sorted_primary_alignments.fetch(chrom))
+        if contigs:
+            placement[chrom] = contigs
+    if not args.legacy_junctions and not args.no_extension:
+        et_fname = "extension.tsv"
+        if args.prefix != "":
+            et_fname = args.prefix + '.' + et_fname
+        ref_lengths = dict(zip(sorted_primary_alignments.references, sorted_primary_alignments.lengths))
+        candidates = collect_extension_candidates(args.query_bam, unplaced)
+        placement, inserted = extend_placement(args, placement, candidates, ref_lengths, et_fname)
+        propagate_extents(extents, inserted, placement)
+        if inserted and args.store_final_bam is not None:
+            # Include inserted contigs in the stored final BAM.
+            sorted_primary_alignments.close()
+            os.remove(sorted_primary_alignments_bam + '.bai')
+            sorted_bam_from_aln_list([c for cs in placement.values() for c in cs], query_bam.header,
+                                     sorted_bam_name=args.store_final_bam)
+            pysam.index(sorted_primary_alignments_bam)
+            sorted_primary_alignments = pysam.AlignmentFile(sorted_primary_alignments_bam, "rb")
+
     junctions_tsv = None
     if not args.legacy_junctions:
         jt_fname = "junctions.tsv"
@@ -583,11 +619,11 @@ def main():
         junctions_tsv.write("chrom\tprev_contig\tcontig\tpos\tcontig_ext_start\tprev_resid3\tcontig_resid5"
                             "\tprev_chain_n\tcontig_chain_n\test_dist\twindow_bp\toverlap_candidates"
                             "\tdecision\ttrim_bp\tpatch_ref_start\tpatch_ref_end\tpatch_bp\treason\n")
-        overlaps = prepare_junctions(args, sorted_primary_alignments, extents)
+        overlaps = prepare_junctions(args, placement, extents)
 
     for ref_seq in SeqIO.parse(args.reference_fasta, "fasta"):
-        # Select all contigs mapped to this sequence.
-        contigs = list(sorted_primary_alignments.fetch(ref_seq.id))
+        # Select all contigs placed on this sequence.
+        contigs = placement.get(ref_seq.id, [])
 
         # If no contigs map to this sequence, either print it unchanged
         # or omit it, depending on args.
@@ -648,6 +684,198 @@ def compute_extents(args, primary_alignments):
                 for name, span in spans.items())
 
 
+def suffix_prefix_overlaps(tail, head, len_a, len_b, k, min_id, min_ovl):
+    """
+    Lengths (>= min_ovl) of exact-anchored overlaps between the end of
+    contig a (tail: its last bases, as placed) and the start of contig b
+    (head: its first bases), verified at >= min_id identity.
+    """
+    lp, lc = len(tail), len(head)
+    if lp < k or lc < k:
+        return []
+    ov1 = set(lp - i for i in find_all(tail, head[:k]))
+    if not ov1:
+        return []
+    ov2 = set(j + k for j in find_all(head, tail[-k:]))
+    return [o for o in sorted(ov1 & ov2)
+            if min_ovl <= o < min(len_a, len_b) and identity_at_least(tail[lp - o:], head[:o], min_id)]
+
+
+def collect_extension_candidates(bam_path, unplaced):
+    """
+    Primary alignments of unplaced contigs eligible for overlap extension
+    (left out for low mapping quality or nesting), keyed on reference name.
+    """
+    names = set(n for n, (reason, _) in unplaced.items() if reason in ("low_mapq", "nested"))
+    cands = {}
+    with pysam.AlignmentFile(bam_path) as bam:
+        for aln in bam:
+            if aln.is_unmapped or aln.is_secondary or aln.is_supplementary or aln.query_name not in names:
+                continue
+            if aln.query_sequence is None or len(aln.query_sequence) != aln.infer_read_length():
+                continue
+            cands.setdefault(aln.reference_name, []).append(aln)
+    return cands
+
+
+def extend_placement(args, placement, candidates, ref_lengths, log_fname):
+    """
+    Insert unplaced contigs into the gaps between placed contigs (and at
+    chromosome ends) by walking through unambiguous sequence overlaps.
+
+    For each gap between adjacent placed contigs A and B, a forward walk
+    starts at A and a backward walk at B (aiming for the end of the forward
+    walk). At each step, the candidates are unplaced contigs whose primary
+    alignment is on the same reference sequence, within the gap region
+    (padded by --ext_region_pad) and used in the orientation of that
+    alignment. A candidate is added if it is the only one whose 5' end
+    (forward) or 3' end (backward) overlaps the current contig end by
+    >= --ext_min_overlap. A walk stops when no candidate or more than one
+    qualifies, when it reaches the opposite flanking contig, or after
+    --ext_max_steps contigs. Contigs claimed by more than one walk are
+    rejected and walks are truncated before them.
+
+    Returns (new placement, inserted), where inserted maps each inserted
+    contig to (direction, anchor contig name, overlap).
+    """
+    sys.stderr.write("Extending placements through contig overlaps...\n")
+    W = args.ext_window
+    seq_ends = {}
+
+    def ends(aln):
+        if aln.query_name not in seq_ends:
+            s = aln.query_sequence.upper()
+            seq_ends[aln.query_name] = (s[:W], s[-W:], len(s))
+        return seq_ends[aln.query_name]
+
+    def ovl(a, b):
+        _, ta, la = ends(a)
+        hb, _, lb = ends(b)
+        return suffix_prefix_overlaps(ta, hb, la, lb, args.anchor, args.min_overlap_identity, args.ext_min_overlap)
+
+    log = []
+    walks = {}
+    steps = {}   # (chrom, gap, direction, name) -> (anchor name, overlap)
+    for chrom, placed in placement.items():
+        L = ref_lengths[chrom]
+        for gi in range(len(placed) + 1):
+            A = placed[gi - 1] if gi > 0 else None
+            B = placed[gi] if gi < len(placed) else None
+            lo = (A.reference_start - args.ext_region_pad) if A is not None else 0
+            hi = (B.reference_end + args.ext_region_pad) if B is not None else L
+            pool = [c for c in candidates.get(chrom, []) if c.reference_start >= lo and c.reference_end <= hi]
+            res = {"fwd": [], "bwd": []}
+            fwd_closed = False
+            for direction in ("fwd", "bwd"):
+                if direction == "fwd":
+                    start, target = A, B
+                else:
+                    start, target = B, (res["fwd"][-1] if res["fwd"] else A)
+                if start is None or (direction == "bwd" and fwd_closed):
+                    continue
+                fwd_names = set(c.query_name for c in res["fwd"])
+                cur, used, why = start, set(), "max steps"
+                for step in range(args.ext_max_steps):
+                    if target is not None:
+                        closed = ovl(cur, target) if direction == "fwd" else ovl(target, cur)
+                        if closed:
+                            why = "reached %s" % target.query_name
+                            fwd_closed = fwd_closed or direction == "fwd"
+                            break
+                    hits = []
+                    for x in pool:
+                        if x.query_name in used or x.query_name in fwd_names:
+                            continue
+                        o = ovl(cur, x) if direction == "fwd" else ovl(x, cur)
+                        if o:
+                            hits.append((x, o))
+                    if len(hits) != 1:
+                        why = "no candidate" if not hits else "ambiguous: %s" % ",".join(h[0].query_name for h in hits)
+                        break
+                    x, o = hits[0]
+                    res[direction].append(x)
+                    used.add(x.query_name)
+                    steps[(chrom, gi, direction, x.query_name)] = (cur.query_name, min(o))
+                    log.append([chrom, gi, A.query_name if A is not None else "START",
+                                B.query_name if B is not None else "END", direction, step, cur.query_name,
+                                x.query_name, "-" if x.is_reverse else "+", ",".join(str(v) for v in o)])
+                    cur = x
+                log.append([chrom, gi, A.query_name if A is not None else "START",
+                            B.query_name if B is not None else "END", direction, "stop", cur.query_name,
+                            ".", ".", why])
+            walks[(chrom, gi)] = res
+
+    claims = {}
+    for r in walks.values():
+        for d in ("fwd", "bwd"):
+            for x in r[d]:
+                claims[x.query_name] = claims.get(x.query_name, 0) + 1
+    conflicted = set(n for n, c in claims.items() if c > 1)
+    for (chrom, gi), r in walks.items():
+        for d in ("fwd", "bwd"):
+            for i, x in enumerate(r[d]):
+                if x.query_name in conflicted:
+                    for y in r[d][i:]:
+                        log.append([chrom, gi, ".", ".", d, "rejected", ".", y.query_name, ".",
+                                    "claimed by several walks" if y.query_name in conflicted
+                                    else "follows a rejected contig"])
+                    r[d] = r[d][:i]
+                    break
+
+    new_placement, inserted = {}, {}
+    for chrom, placed in placement.items():
+        order = []
+        for gi in range(len(placed) + 1):
+            r = walks[(chrom, gi)]
+            for d, lst in (("fwd", r["fwd"]), ("bwd", list(reversed(r["bwd"])))):
+                for x in lst:
+                    order.append(x)
+                    anchor, o = steps[(chrom, gi, d, x.query_name)]
+                    inserted[x.query_name] = (d, anchor, o)
+            if gi < len(placed):
+                order.append(placed[gi])
+        new_placement[chrom] = order
+
+    with open(log_fname, "w") as f:
+        f.write("# GPatch %s %s\n" % (__version__, " ".join(sys.argv[1:])))
+        f.write("chrom\tgap\tleft\tright\tdirection\tstep\tfrom\tadded\tstrand\toverlaps_or_reason\n")
+        for row in log:
+            f.write("\t".join(str(v) for v in row) + "\n")
+    sys.stderr.write("Overlap extension inserted %d contigs (%d rejected as claimed by several walks).\n"
+                     % (len(inserted), len(conflicted)))
+    return new_placement, inserted
+
+
+def propagate_extents(extents, inserted, placement):
+    """
+    Reference extents of contigs inserted by overlap extension, carried from
+    the contig each was reached from through the measured overlap (their own
+    alignments have low mapping quality and are not used). Forward: start =
+    anchor end - overlap; backward: end = anchor start + overlap. The
+    residual unaligned length of the anchor end is inherited at both ends.
+    """
+    lengths = dict((c.query_name, len(c.query_sequence)) for cs in placement.values() for c in cs)
+    pending = dict(inserted)
+    while pending:
+        progress = False
+        for name, (d, anchor, o) in list(pending.items()):
+            if anchor in pending:
+                continue
+            A = extents[anchor]
+            if d == "fwd":
+                s0 = A["end"] - o
+                extents[name] = {"start": s0, "end": s0 + lengths[name], "resid5": A["resid3"],
+                                 "resid3": A["resid3"], "nchain": 0}
+            else:
+                e0 = A["start"] + o
+                extents[name] = {"start": e0 - lengths[name], "end": e0, "resid5": A["resid5"],
+                                 "resid3": A["resid5"], "nchain": 0}
+            del pending[name]
+            progress = True
+        if not progress:
+            raise RuntimeError("cyclic overlap-extension anchors: %s" % ",".join(pending))
+
+
 def write_unplaced(args, placed, unplaced):
     """
     Write contigs present in the input BAM but absent from the
@@ -682,18 +910,15 @@ def write_unplaced(args, placed, unplaced):
     sys.stderr.write("%d contigs (%d bp) were not placed; see %s and %s.\n" % (n, bp, ut_fname, uf_fname))
 
 
-def prepare_junctions(args, sorted_primary_alignments, extents):
+def prepare_junctions(args, placement, extents):
     """
     Measure overlaps at every junction between adjacent placed contigs,
-    using the chained extents to size the search windows. Returns the
+    using the contig extents to size the search windows. placement maps each
+    reference sequence to its placed contig alignments, in order. Returns the
     overlaps keyed on (prev_name, name).
     """
     sys.stderr.write("Measuring junction overlaps...\n")
-    order = {}
-    for chrom in sorted_primary_alignments.references:
-        contigs = list(sorted_primary_alignments.fetch(chrom))
-        if contigs:
-            order[chrom] = contigs
+    order = placement
 
     minimap2 = args.minimap2 if args.minimap2 is not None else shutil.which("minimap2")
     if args.indel_tol > 0 and not minimap2:

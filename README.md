@@ -36,6 +36,7 @@ GPatch.py [-h] -q SAM/BAM -r FASTA [-x STR] [-b FILENAME] [-m N] [-w PATH] [-d] 
           [--legacy_junctions] [--max_resid N] [--chain_mapq N] [--chain_minlen N] [--chain_maxgap N]
           [--chain_tol N] [--anchor N] [--min_overlap_identity F] [--indel_tol N] [--max_mm2_tests N]
           [--win_min N] [--win_max N] [--minimap2 PATH] [--threads N]
+          [--no_extension] [--ext_min_overlap N] [--ext_region_pad N] [--ext_window N] [--ext_max_steps N]
 ```
 
 Starting with alignments of contigs to a reference genome, produce a chromosome-scale pseudoassembly by patching gaps between mapped contigs with sequences from the reference. By default, reference chromosomes with no mapped contigs are printed to output unchanged. Use the --drop_missing option to disable this behavior. By default, patches are applied to the 5' and 3' telomere ends of pseudochromsomes if the first and last contig alignments do not extend to the start/end of the reference chromsome. In some cases, this may cause spurious duplications. Use the --no_extend option if this is a concern. Note that GPatch is designed to be run on single-haplotype or unphased genome assemblies. For phased assemblies, each haplotype should be separated into its own input FASTA file prior to alignment. GPatch can then be run separately on the BAM files for each haplotype to obtain phased pseudoassemblies, otherwise results will be unpredictable and likely incorrect.
@@ -79,6 +80,15 @@ Starting with alignments of contigs to a reference genome, produce a chromosome-
 | __--minimap2 PATH__ | Path to minimap2, used only to verify candidate overlaps containing indels. Default: minimap2 on PATH; if not found, such candidates are not considered. |
 | __--threads N__ | Number of processes used for overlap detection. Default=1 |
 
+#### Overlap-Extension Arguments:
+| Argument | Description |
+|---|---|
+| __--no_extension__ | Do not insert unplaced contigs by overlap extension. |
+| __--ext_min_overlap N__ | Minimum overlap (bp) for an extension step, or for a walk to be considered to have reached the opposite flanking contig. Short overlaps in tandem and palindromic repeats are often spurious. Default=5000 |
+| __--ext_region_pad N__ | A candidate contig's primary alignment must lie within the gap region extended by this many bp beyond the flanking contigs' alignments. Default=1000000 |
+| __--ext_window N__ | Size (bp) of the contig-end windows searched for extension overlaps. Default=2000000 |
+| __--ext_max_steps N__ | Maximum number of contigs added by one walk. Default=50 |
+
 ## Junction Handling
 
 At each junction between adjacent placed contigs, GPatch either trims the 5' end of the second contig (the contigs overlap), patches the gap between them with reference sequence, or bookends them. N characters are never introduced, except that patches are replaced by N runs in --scaffold_only mode.
@@ -95,6 +105,8 @@ At each junction between adjacent placed contigs, GPatch either trims the 5' end
 | patch_one_sided | No overlap; the estimated gap is >= 0 and one-sided. The gap is patched with reference sequence. |
 | bookend | No overlap; the estimate predicts an overlap or is untrusted. The contigs are joined directly. |
 
+__Overlap extension.__ Contigs left out because of low mapping quality or nesting are often unambiguously connected to placed contigs by sequence overlap. After alignment-based placement, GPatch walks into each gap (and each chromosome end) from both flanking placed contigs. At each step, it adds an unplaced contig if it is the only one that overlaps the current contig end by at least --ext_min_overlap and its primary alignment is on the same reference sequence, within the gap region and in the orientation in which it would be placed. A walk stops at the first ambiguous or missing step, or when it reaches the contig on the other side of the gap; contigs claimed by more than one walk are rejected. Because the alignments of inserted contigs are unreliable, their reference extents are carried from the contig each was reached from through the measured overlap, and inherit that contig's residual for the decision rules. Every step and stop reason is written to extension.tsv. Disable with --no_extension.
+
 Chromosome ends are patched when the residual at the terminal contig end is at most --max_resid (and --no_extend is not set). Contigs are never trimmed against a chromosome end. The decision and reasoning for every junction are written to junctions.tsv.
 
 ## Output
@@ -107,6 +119,7 @@ GPatch produces the following output files:
 | __patches.bed__ | Location of patches in the coordinate frame of the reference genome. |
 | __unplaced.tsv__ | Contigs in the input BAM that are not in the pseudoassembly, with the reason (unmapped, low_mapq, whitelist, nested) and their primary alignment. |
 | __unplaced.fasta__ | Sequences of the unplaced contigs, in their original orientation. |
+| __extension.tsv__ | Every overlap-extension walk step (contig added, orientation, overlaps) and the reason each walk stopped, including contigs rejected because several walks claimed them. Not written with --legacy_junctions or --no_extension. |
 | __junctions.tsv__ | The decision (trim, patch or bookend) made at each junction between adjacent contigs and at chromosome ends, with the contig extents, residual unaligned lengths, gap estimate, candidate overlaps and the reason for the decision. Not written with --legacy_junctions. |
 
 ## Helper Scripts
